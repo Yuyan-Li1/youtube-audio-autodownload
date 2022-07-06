@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# aviod accidentally uploading private API keys to GitHub
+API_key
