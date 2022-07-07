@@ -3,9 +3,12 @@
 import argparse
 import datetime
 from pathlib import Path
+from pprint import pprint
 
+import dateutil.parser
 import googleapiclient.discovery
 import googleapiclient.errors
+import pytz
 import yt_dlp
 
 debug = False
@@ -20,20 +23,31 @@ youtube = googleapiclient.discovery.build(api_service_name, api_version, develop
 def main(date=None, arg_debug=False):
     global debug
     debug = arg_debug
+    now = datetime.datetime.now()
+    now = pytz.UTC.localize(now)
+    videos = []
+
     with open('channel_ids') as f:
         channel_ids = f.read().splitlines()
 
     if date:
+        dt = datetime.datetime.combine(date, datetime.time())
+        dt = pytz.UTC.localize(dt)
         for channel_id in channel_ids:
-            get_video_list(channel_id, date)
+            videos = get_video_list(channel_id, dt)
     else:
-        # todo: add read date from file
-        pass
+        last_run = dateutil.parser.isoparse(Path('last_download_date').read_text())
+        # last_run = pytz.UTC.localize(last_run)
+        for channel_id in channel_ids:
+            videos = get_video_list(channel_id, last_run)
 
-    # todo: add download audio
-    
+    for video in videos:
+        download_audio(video['id'])
 
-def get_video_list(channel_id, date):
+    Path('last_download_date').write_text(now.isoformat())
+
+
+def get_video_list(channel_id, dt):
     request = youtube.search().list(
         part="snippet",
         channelId=channel_id,
@@ -47,11 +61,13 @@ def get_video_list(channel_id, date):
         new_video = {
             'id': video['id']['videoId'],
             'title': video['snippet']['title'],
-            'publishedAt': video['snippet']['publishedAt'],
+            'publishedAt': dateutil.parser.isoparse(video['snippet']['publishedAt']),
         }
-        videos.append(new_video)
+        if new_video['publishedAt'] >= dt:
+            videos.append(new_video)
 
     debug_print(videos)
+    return videos
 
 
 # uses youtube_dlp instead of youtube_dl for speed.
@@ -73,7 +89,7 @@ def download_audio(video_id):
 
 def debug_print(message):
     if debug:
-        print(message)
+        pprint(message)
 
 
 if __name__ == "__main__":
