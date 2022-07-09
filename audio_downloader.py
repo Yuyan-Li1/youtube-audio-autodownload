@@ -36,11 +36,13 @@ def main(date=None, arg_debug=False):
         for channel_id in channel_ids:
             videos = get_video_list(channel_id, dt)
     else:
-        last_run = dateutil.parser.isoparse(Path('last_download_date').read_text())
+        debug_print(Path('last_download_date').read_text())
+        last_run = dateutil.parser.isoparse(Path('last_download_date').read_text().strip())
         # last_run = pytz.UTC.localize(last_run)
         for channel_id in channel_ids:
-            videos = get_video_list(channel_id, last_run)
+            videos = videos + get_video_list(channel_id, last_run)
 
+    debug_print(videos)
     for video in videos:
         download_audio(video['id'])
 
@@ -76,11 +78,11 @@ def download_audio(video_id):
 
     ydl_opts = {
         'paths': {'home': './downloads/'},
-        'format': 'm4a/bestaudio/best',
-        'postprocessors': [{  # Extract audio using ffmpeg
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'm4a',
-        }]
+        'format': 'm4a/bestaudio/best' #,
+        # 'postprocessors': [{  # Extract audio using ffmpeg
+        #    'key': 'FFmpegExtractAudio',
+        #    'preferredcodec': 'm4a',
+        # }]
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
