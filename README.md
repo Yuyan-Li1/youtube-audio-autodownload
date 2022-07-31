@@ -29,3 +29,8 @@ latest videos of each channel. It is a plain JSON file and can be modified if yo
 - Having a YouTube API key and rename it to 'API_key', and put it in the same directory as this script. You can find out
   how to get
   one [here](https://developers.google.com/youtube/v3/getting-started).
+
+## Other
+
+If you don't know how to get the id of a YouTube channel, you can
+use [this site](https://commentpicker.com/youtube-channel-id.php).
