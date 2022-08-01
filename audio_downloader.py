@@ -104,6 +104,7 @@ def download_audio(video_id):
     ydl_opts = {
         'paths': {'home': './downloads/'},
         'format': 'm4a/bestaudio/best',
+        'outtmpl': '%(title)s-%(channel)s.%(ext)s'
         # 'postprocessors': [{  # Extract audio using ffmpeg
         #     'key': 'FFmpegExtractAudio',
         #     'preferredcodec': 'm4a',
