@@ -112,7 +112,10 @@ def download_audio(video_id):
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        error_code = ydl.download(f'{video_link_prefix}{video_id}')
+        try:
+            error_code = ydl.download(f'{video_link_prefix}{video_id}')
+        except yt_dlp.utils.DownloadError as e:
+            print(f'Error: {e}')
 
 
 def debug_print(message):
