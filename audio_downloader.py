@@ -1,155 +1,255 @@
 # -*- coding: utf-8 -*-
+"""YouTube audio downloader - main entry point.
+
+Downloads audio from YouTube videos of specified channels and moves them
+to a target directory (designed for podcast apps like Castro).
+
+Designed for cron job execution with:
+- Idempotent operation (safe to run multiple times)
+- Download history tracking (prevents duplicate downloads)
+- Lock file to prevent concurrent runs
+- Proper logging for debugging cron issues
+"""
 
 import argparse
-import json
+import logging
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from pprint import pprint
+from typing import Optional
 
-import dateutil.parser
-import googleapiclient.discovery
-import googleapiclient.errors
-import yt_dlp
+from config import Config, ConfigError, load_config
+from downloader import BatchDownloadResult, download_videos
+from file_ops import move_audio_files
+from history import (
+    DownloadHistory,
+    cleanup_old_entries,
+    create_video_record,
+    filter_new_videos,
+    load_history,
+    save_history,
+)
+from lock import lock_context
+from youtube_api import VideoInfo, create_youtube_client, fetch_all_channels_videos
 
-debug = False
-
-scopes = ["https://www.googleapis.com/auth/youtube.force-ssl"]
-api_service_name = "youtube"
-api_version = "v3"
-
-youtube = googleapiclient.discovery.build(api_service_name, api_version, developerKey=Path('API_key').read_text())
-
-
-def main(arg_debug=False):
-    global debug
-    debug = arg_debug
-    videos = []
-    data = Path('last_downloaded')
-
-    with open('channel_ids') as f:
-        channel_ids = f.read().splitlines()
-
-    if not data.exists():
-        debug_print('Datafile does not exist')
-        init_dict(channel_ids)
-        return
-
-    data = read_dict()
-    debug_print(f'Read from the datafile: {data}')
-
-    for channel in data:
-        result = get_video_list(channel['channel_id'], channel['video_id'])
-        videos += result[0]
-        latest = result[1]
-        channel['video_id'] = latest
-
-    for video in videos:
-        download_audio(video['id'])
-
-    write_dict(data)
+logger = logging.getLogger(__name__)
 
 
-def get_video_list(channel_id, last_downloaded=None):
-    """
-    Returns a list of videos from a YouTube channel.
+def setup_logging(log_level: str, log_file: Optional[Path] = None) -> None:
+    """Configure logging for the application.
+
     Args:
-        channel_id: the channel id of the channel to get the video list from.
-        last_downloaded: if this is not None, it will be used to get the latest videos up to this one.
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+        log_file: Optional file to write logs to.
+    """
+    handlers: list[logging.Handler] = []
+
+    # Console handler (stderr for cron compatibility)
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    )
+    handlers.append(console_handler)
+
+    # File handler if specified
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        handlers.append(file_handler)
+
+    # Configure root logger
+    logging.basicConfig(
+        level=getattr(logging, log_level),
+        handlers=handlers,
+    )
+
+
+def run(config: Config) -> int:
+    """Main execution flow.
+
+    This is the core logic, separated from main() for testability.
+
+    Args:
+        config: Configuration object.
 
     Returns:
-        A list of videos from the channel up to the last downloaded video provided (exclusive)
-            and the last video of the channel.
-        The id of the last video of the channel is returned if no last_downloaded is provided, t
-
+        Exit code (0 for success, 1 for error).
     """
-    if last_downloaded:
-        request = youtube.search().list(
-            part="snippet",
-            channelId=channel_id,
-            maxResults=25,
-            order="date",
-            type="video"
-        )
-        response = request.execute()
-        videos = []
-        lastest = response['items'][0]['id']['videoId']
-        for video in response['items']:
-            new_video = {
-                'id': video['id']['videoId'],
-                'title': video['snippet']['title'],
-                'publishedAt': dateutil.parser.isoparse(video['snippet']['publishedAt']),
-            }
-            if new_video['id'] == last_downloaded:
-                break
-            else:
-                videos.append(new_video)
+    # 1. Load download history
+    history = load_history(config.history_file)
+    downloaded_ids = history.get_downloaded_ids()
+    logger.info(
+        f"Loaded history with {len(downloaded_ids)} previously downloaded videos"
+    )
 
-        debug_print(f'From channel {channel_id}, fetched new videos: {videos}')
-        return videos, lastest
-    else:
-        request = youtube.search().list(
-            part="snippet",
-            channelId=channel_id,
-            maxResults=1,
-            order="date",
-            type="video"
-        )
-        response = request.execute()
-        return response['items'][0]['id']['videoId']
+    # 2. Calculate lookback window
+    since_date = datetime.now(timezone.utc) - timedelta(days=config.lookback_days)
+    logger.info(f"Checking for videos published since {since_date.date()}")
+
+    # 3. Create YouTube client and fetch videos from all channels
+    client = create_youtube_client(config.api_key)
+    all_videos = fetch_all_channels_videos(
+        client, config.channel_ids, since_date, dry_run=config.dry_run
+    )
+
+    if not all_videos:
+        logger.info("No videos found in the lookback window")
+        return 0
+
+    # 4. Filter out already downloaded videos (idempotent operation)
+    new_videos = filter_new_videos(all_videos, downloaded_ids)
+
+    if not new_videos:
+        logger.info("All videos already downloaded, nothing to do")
+        return 0
+
+    logger.info(f"Found {len(new_videos)} new video(s) to download")
+
+    # 5. Download each video
+    download_results = download_videos(new_videos, config.download_dir)
+
+    # 6. Update history with successful downloads
+    history = update_history_with_results(history, download_results, new_videos)
+
+    # 7. Save updated history
+    if not save_history(history, config.history_file):
+        logger.error("Failed to save history file")
+
+    # 8. Move downloaded files to target directory
+    move_results = move_audio_files(config.download_dir, config.target_dir)
+
+    # 9. Cleanup old history entries periodically
+    history = cleanup_old_entries(history, max_age_days=90)
+    save_history(history, config.history_file)
+
+    # 10. Log summary
+    log_summary(download_results, move_results)
+
+    # Return error if any downloads failed
+    return 1 if download_results.failure_count > 0 else 0
 
 
-# uses youtube_dlp instead of youtube_dl for speed.
-def download_audio(video_id):
-    video_link_prefix = 'https://www.youtube.com/watch?v='
+def update_history_with_results(
+    history: DownloadHistory,
+    results: BatchDownloadResult,
+    videos: list[VideoInfo],
+) -> DownloadHistory:
+    """Update history with successful downloads.
 
-    ydl_opts = {
-        'paths': {'home': './downloads/'},
-        'format': 'm4a/bestaudio/best',
-        'outtmpl': '%(title)s - %(channel)s.%(ext)s'
-        # 'postprocessors': [{  # Extract audio using ffmpeg
-        #     'key': 'FFmpegExtractAudio',
-        #     'preferredcodec': 'm4a',
-        # }]
-    }
+    Args:
+        history: Current download history.
+        results: Download results.
+        videos: Original video info list.
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    Returns:
+        Updated history.
+    """
+    # Create a lookup for video info
+    video_lookup = {v["id"]: v for v in videos}
+
+    for result in results.successful:
+        video_info = video_lookup.get(result.video_id)
+        if video_info:
+            record = create_video_record(
+                video_id=result.video_id,
+                title=result.title,
+                channel_id=result.channel_id,
+                published_at=video_info["published_at"],
+            )
+            history = history.add_video(record)
+
+    return history
+
+
+def log_summary(
+    download_results: BatchDownloadResult,
+    move_results,
+) -> None:
+    """Log a summary of the run.
+
+    Args:
+        download_results: Results of download operations.
+        move_results: Results of file move operations.
+    """
+    logger.info("=" * 50)
+    logger.info("Run Summary")
+    logger.info("=" * 50)
+    logger.info(
+        f"Downloads: {download_results.success_count} successful, {download_results.failure_count} failed"
+    )
+    logger.info(
+        f"Files moved: {move_results.success_count} successful, {move_results.failure_count} failed"
+    )
+
+    if download_results.failed:
+        logger.warning("Failed downloads:")
+        for failure in download_results.failed:
+            logger.warning(f"  - {failure.title}: {failure.error}")
+
+    if move_results.failed:
+        logger.warning("Failed moves:")
+        for failure in move_results.failed:
+            logger.warning(f"  - {failure.source.name}: {failure.error}")
+
+    logger.info("=" * 50)
+
+
+def main() -> int:
+    """Main entry point.
+
+    Returns:
+        Exit code (0 for success, non-zero for error).
+    """
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description="Download audio from YouTube channels and move to podcast folder."
+    )
+    parser.add_argument(
+        "-d",
+        "--debug",
+        action="store_true",
+        help="Enable debug logging (overrides LOG_LEVEL env var).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Dry run mode: use mock data instead of calling YouTube API (saves API quota).",
+    )
+    args = parser.parse_args()
+
+    # Load configuration
+    try:
+        config = load_config(dry_run=args.dry_run)
+    except ConfigError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 1
+
+    # Setup logging (debug flag overrides env var)
+    log_level = "DEBUG" if args.debug else config.log_level
+    setup_logging(log_level, config.log_file)
+
+    logger.info("Starting YouTube audio downloader")
+    if config.dry_run:
+        logger.info("*** DRY RUN MODE: Using mock data, not consuming API quota ***")
+
+    # Acquire lock to prevent concurrent runs
+    lock_file = Path(__file__).parent / "youtube_downloader.lock"
+
+    with lock_context(lock_file) as acquired:
+        if not acquired:
+            logger.error("Another instance is already running, exiting")
+            return 1
+
         try:
-            error_code = ydl.download(f'{video_link_prefix}{video_id}')
-        except yt_dlp.utils.DownloadError as e:
-            debug_print(f'Error: {e}')
-
-
-def debug_print(message):
-    if debug:
-        pprint(message)
-
-
-# these functions read and writes the data from and to the file last_downloaded
-def read_dict():
-    with open('last_downloaded', 'r') as file:
-        return json.load(file)
-
-
-def write_dict(data):
-    with open('last_downloaded', 'w') as file:
-        json.dump(data, file)
-    debug_print(f'Wrote to the datafile')
-
-
-def init_dict(channels):
-    data = []
-    for channel in channels:
-        video_id = get_video_list(channel)
-        last_downloaded = {
-            'channel_id': channel,
-            'video_id': video_id
-        }
-        data.append(last_downloaded)
-    write_dict(data)
-    debug_print(f'Initialized the datafile: {data}')
+            return run(config)
+        except Exception as e:
+            logger.exception(f"Unexpected error: {e}")
+            return 1
+        finally:
+            logger.info("Done")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Download audio from YouTube channels specified in channel_id.txt.')
-    parser.add_argument('-D', '--debug', action='store_true', help='Print debug messages.')
-    args = parser.parse_args()
-    main(args.debug)
+    sys.exit(main())
