@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """YouTube API module for fetching video information.
 
 Contains pure functions for interacting with the YouTube Data API.
@@ -72,14 +71,10 @@ def _validate_max_results(max_results: int) -> int:
         Validated max_results within API limits (1-50).
     """
     if max_results < MIN_RESULTS_LIMIT:
-        logger.warning(
-            f"max_results {max_results} is below minimum, using {MIN_RESULTS_LIMIT}"
-        )
+        logger.warning(f"max_results {max_results} is below minimum, using {MIN_RESULTS_LIMIT}")
         return MIN_RESULTS_LIMIT
     if max_results > MAX_RESULTS_LIMIT:
-        logger.warning(
-            f"max_results {max_results} exceeds API limit, using {MAX_RESULTS_LIMIT}"
-        )
+        logger.warning(f"max_results {max_results} exceeds API limit, using {MAX_RESULTS_LIMIT}")
         return MAX_RESULTS_LIMIT
     return max_results
 
@@ -149,9 +144,7 @@ def fetch_channel_videos(
     if dry_run:
         mock_count = int(os.getenv("DRY_RUN_MOCK_VIDEO_COUNT", "2"))
         mock_videos = _create_mock_videos(channel_id, since, count=mock_count)
-        logger.info(
-            f"[DRY RUN] Channel {channel_id}: returning {len(mock_videos)} mock videos"
-        )
+        logger.info(f"[DRY RUN] Channel {channel_id}: returning {len(mock_videos)} mock videos")
         return mock_videos
 
     try:
@@ -218,15 +211,11 @@ def fetch_all_channels_videos(
     # Sort by publish date, newest first
     all_videos.sort(key=lambda v: v["published_at"], reverse=True)
 
-    logger.info(
-        f"Found {len(all_videos)} total videos from {len(channel_ids)} channels"
-    )
+    logger.info(f"Found {len(all_videos)} total videos from {len(channel_ids)} channels")
     return all_videos
 
 
-def _parse_playlist_response(
-    response: dict, channel_id: str, since: datetime
-) -> list[VideoInfo]:
+def _parse_playlist_response(response: dict, channel_id: str, since: datetime) -> list[VideoInfo]:
     """Parse YouTube playlistItems API response into VideoInfo list.
 
     Args:
@@ -276,9 +265,7 @@ def _parse_playlist_response(
     return videos
 
 
-def _create_mock_videos(
-    channel_id: str, since: datetime, count: int = 2
-) -> list[VideoInfo]:
+def _create_mock_videos(channel_id: str, since: datetime, count: int = 2) -> list[VideoInfo]:
     """Create mock video data for dry run testing.
 
     Args:

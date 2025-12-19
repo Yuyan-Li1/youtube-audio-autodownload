@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """File operations module for moving downloaded audio files.
 
 Contains functions for moving files from download directory to target directory.
@@ -8,7 +7,6 @@ import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +18,7 @@ class MoveResult:
     source: Path
     destination: Path
     success: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -131,10 +129,7 @@ def move_audio_files(
         else:
             result.failed.append(move_result)
 
-    logger.info(
-        f"Move complete: {result.success_count} successful, "
-        f"{result.failure_count} failed"
-    )
+    logger.info(f"Move complete: {result.success_count} successful, {result.failure_count} failed")
 
     return result
 
@@ -156,7 +151,7 @@ def ensure_directory(path: Path) -> bool:
         return False
 
 
-def list_files(directory: Path, extensions: Optional[set[str]] = None) -> list[Path]:
+def list_files(directory: Path, extensions: set[str] | None = None) -> list[Path]:
     """List files in a directory, optionally filtered by extension.
 
     Args:
