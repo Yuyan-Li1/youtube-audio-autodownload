@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Download history management for YouTube audio downloader.
 
 Tracks which videos have been successfully downloaded to prevent duplicates
@@ -67,7 +66,7 @@ def load_history(history_file: Path) -> DownloadHistory:
         return DownloadHistory(downloaded_videos={})
 
     try:
-        with open(history_file, "r", encoding="utf-8") as f:
+        with open(history_file, encoding="utf-8") as f:
             data = json.load(f)
 
         downloaded = data.get("downloaded_videos", {})

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Audio download module using yt-dlp.
 
 Handles downloading audio from YouTube videos with retry logic.
@@ -9,7 +8,6 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import yt_dlp
 
@@ -33,7 +31,7 @@ class DownloadResult:
     title: str
     channel_id: str
     success: bool
-    error: Optional[str] = None
+    error: str | None = None
     retry_count: int = 0
 
 
@@ -138,9 +136,7 @@ def _is_permanent_error(error_msg: str) -> bool:
         "copyright claim",
         "This video is no longer available",
     ]
-    return any(
-        indicator.lower() in error_msg.lower() for indicator in permanent_indicators
-    )
+    return any(indicator.lower() in error_msg.lower() for indicator in permanent_indicators)
 
 
 def download_audio(
@@ -170,9 +166,7 @@ def download_audio(
     if max_retries is None:
         max_retries = int(os.getenv("DOWNLOAD_MAX_RETRIES", str(DEFAULT_MAX_RETRIES)))
     if initial_backoff is None:
-        initial_backoff = float(
-            os.getenv("DOWNLOAD_INITIAL_BACKOFF", str(DEFAULT_INITIAL_BACKOFF))
-        )
+        initial_backoff = float(os.getenv("DOWNLOAD_INITIAL_BACKOFF", str(DEFAULT_INITIAL_BACKOFF)))
 
     ydl_opts = {
         "paths": {"home": str(download_dir)},
@@ -188,9 +182,7 @@ def download_audio(
 
     if success:
         if retry_count > 0:
-            logger.info(
-                f"Downloaded: {title or video_id} (after {retry_count} retries)"
-            )
+            logger.info(f"Downloaded: {title or video_id} (after {retry_count} retries)")
         else:
             logger.info(f"Downloaded: {title or video_id}")
 
@@ -245,8 +237,7 @@ def download_videos(
             result.failed.append(download_result)
 
     logger.info(
-        f"Download complete: {result.success_count} successful, "
-        f"{result.failure_count} failed"
+        f"Download complete: {result.success_count} successful, {result.failure_count} failed"
     )
 
     return result

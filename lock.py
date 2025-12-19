@@ -1,14 +1,14 @@
-# -*- coding: utf-8 -*-
 """Lock file mechanism to prevent concurrent cron job runs.
 
 Uses a simple file-based lock with PID verification to handle stale locks.
 """
 
+import contextlib
 import logging
 import os
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +43,12 @@ def acquire_lock(lock_file: Path = DEFAULT_LOCK_FILE) -> bool:
                     logger.warning(f"Another instance is running (PID: {pid})")
                     return False
                 else:
-                    logger.info(
-                        f"Stale lock file found (PID {pid} not running), removing"
-                    )
+                    logger.info(f"Stale lock file found (PID {pid} not running), removing")
                     lock_file.unlink()
         except (ValueError, OSError) as e:
             logger.warning(f"Invalid lock file, removing: {e}")
-            try:
+            with contextlib.suppress(OSError):
                 lock_file.unlink()
-            except OSError:
-                pass
 
     # Create lock file with our PID
     try:

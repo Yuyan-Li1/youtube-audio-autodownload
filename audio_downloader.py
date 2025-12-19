@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """YouTube audio downloader - main entry point.
 
 Downloads audio from YouTube videos of specified channels and moves them
@@ -14,9 +13,8 @@ Designed for cron job execution with:
 import argparse
 import logging
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 from config import Config, ConfigError, load_config
 from downloader import BatchDownloadResult, download_videos
@@ -40,7 +38,7 @@ from youtube_api import (
 logger = logging.getLogger(__name__)
 
 
-def setup_logging(log_level: str, log_file: Optional[Path] = None) -> None:
+def setup_logging(log_level: str, log_file: Path | None = None) -> None:
     """Configure logging for the application.
 
     Args:
@@ -51,9 +49,7 @@ def setup_logging(log_level: str, log_file: Optional[Path] = None) -> None:
 
     # Console handler (stderr for cron compatibility)
     console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    )
+    console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     handlers.append(console_handler)
 
     # File handler if specified
@@ -85,12 +81,10 @@ def run(config: Config) -> int:
     # 1. Load download history
     history = load_history(config.history_file)
     downloaded_ids = history.get_downloaded_ids()
-    logger.info(
-        f"Loaded history with {len(downloaded_ids)} previously downloaded videos"
-    )
+    logger.info(f"Loaded history with {len(downloaded_ids)} previously downloaded videos")
 
     # 2. Calculate lookback window
-    since_date = datetime.now(timezone.utc) - timedelta(days=config.lookback_days)
+    since_date = datetime.now(UTC) - timedelta(days=config.lookback_days)
     logger.info(f"Checking for videos published since {since_date.date()}")
 
     # 3. Create YouTube client and fetch videos from all channels
@@ -133,9 +127,7 @@ def run(config: Config) -> int:
         logger.error("Failed to save history file")
 
     # 10. Move downloaded files to target directory
-    move_results = move_audio_files(
-        config.download_dir, config.target_dir, config.audio_extensions
-    )
+    move_results = move_audio_files(config.download_dir, config.target_dir, config.audio_extensions)
 
     # 11. Log summary
     log_summary(download_results, move_results)
@@ -190,7 +182,8 @@ def log_summary(
     logger.info("Run Summary")
     logger.info("=" * 50)
     logger.info(
-        f"Downloads: {download_results.success_count} successful, {download_results.failure_count} failed"
+        f"Downloads: {download_results.success_count} successful, "
+        f"{download_results.failure_count} failed"
     )
     logger.info(
         f"Files moved: {move_results.success_count} successful, {move_results.failure_count} failed"
