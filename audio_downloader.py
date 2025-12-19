@@ -30,7 +30,12 @@ from history import (
     save_history,
 )
 from lock import lock_context
-from youtube_api import VideoInfo, create_youtube_client, fetch_all_channels_videos
+from youtube_api import (
+    VideoInfo,
+    create_youtube_client,
+    fetch_all_channels_videos,
+    filter_shorts_and_streams,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +103,14 @@ def run(config: Config) -> int:
         logger.info("No videos found in the lookback window")
         return 0
 
-    # 4. Filter out already downloaded videos (idempotent operation)
+    # 4. Filter out shorts and streams
+    all_videos = filter_shorts_and_streams(client, all_videos, dry_run=config.dry_run)
+
+    if not all_videos:
+        logger.info("No regular videos found (all were shorts or streams)")
+        return 0
+
+    # 5. Filter out already downloaded videos (idempotent operation)
     new_videos = filter_new_videos(all_videos, downloaded_ids)
 
     if not new_videos:
@@ -107,25 +119,25 @@ def run(config: Config) -> int:
 
     logger.info(f"Found {len(new_videos)} new video(s) to download")
 
-    # 5. Download each video
+    # 6. Download each video
     download_results = download_videos(new_videos, config.download_dir)
 
-    # 6. Update history with successful downloads
+    # 7. Update history with successful downloads
     history = update_history_with_results(history, download_results, new_videos)
 
-    # 7. Cleanup old history entries
+    # 8. Cleanup old history entries
     history = cleanup_old_entries(history, max_age_days=config.history_max_age_days)
 
-    # 8. Save history once (after both update and cleanup)
+    # 9. Save history once (after both update and cleanup)
     if not save_history(history, config.history_file):
         logger.error("Failed to save history file")
 
-    # 9. Move downloaded files to target directory
+    # 10. Move downloaded files to target directory
     move_results = move_audio_files(
         config.download_dir, config.target_dir, config.audio_extensions
     )
 
-    # 10. Log summary
+    # 11. Log summary
     log_summary(download_results, move_results)
 
     # Return error if any downloads failed

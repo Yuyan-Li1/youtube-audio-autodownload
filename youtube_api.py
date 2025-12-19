@@ -7,11 +7,13 @@ OPTIMIZATION: Uses playlistItems.list (1 quota unit) instead of search.list (100
 to significantly reduce API quota consumption. For each channel:
 - channels.list: 1 unit (get uploads playlist ID)
 - playlistItems.list: 1 unit (get videos from playlist)
-Total: ~2 units per channel vs 100 units with search.list
+- videos.list: 1 unit per batch of up to 50 videos (for shorts/stream filtering)
+Total: ~3 units per channel vs 100 units with search.list
 """
 
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta
 from typing import TypedDict
@@ -32,6 +34,9 @@ DEFAULT_API_DELAY = 1.0
 # Maximum results per API request (YouTube API limit is 50)
 MAX_RESULTS_LIMIT = 50
 MIN_RESULTS_LIMIT = 1
+
+# YouTube Shorts are videos <= 60 seconds
+SHORTS_MAX_DURATION_SECONDS = 60
 
 
 class VideoInfo(TypedDict):
@@ -306,3 +311,141 @@ def _create_mock_videos(
         )
 
     return mock_videos
+
+
+def _parse_iso8601_duration(duration: str) -> int:
+    """Parse ISO 8601 duration string to seconds.
+
+    Args:
+        duration: ISO 8601 duration string (e.g., "PT1H30M15S", "PT45S").
+
+    Returns:
+        Duration in seconds.
+    """
+    # Match hours, minutes, and seconds from ISO 8601 duration
+    pattern = r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?"
+    match = re.match(pattern, duration)
+
+    if not match:
+        return 0
+
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = int(match.group(3) or 0)
+
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def fetch_video_details(
+    client,
+    video_ids: list[str],
+) -> dict[str, dict]:
+    """Fetch video details to check for shorts and streams.
+
+    Uses videos.list API (1 quota unit per batch of up to 50 videos).
+
+    Args:
+        client: YouTube API client.
+        video_ids: List of video IDs to fetch details for.
+
+    Returns:
+        Dictionary mapping video ID to its details (duration_seconds, is_live).
+    """
+    if not video_ids:
+        return {}
+
+    details: dict[str, dict] = {}
+
+    try:
+        # YouTube API allows up to 50 IDs per request
+        request = client.videos().list(
+            part="contentDetails,liveStreamingDetails",
+            id=",".join(video_ids[:MAX_RESULTS_LIMIT]),
+        )
+        response = request.execute()
+
+        for item in response.get("items", []):
+            video_id = item["id"]
+            content_details = item.get("contentDetails", {})
+            duration_str = content_details.get("duration", "PT0S")
+            duration_seconds = _parse_iso8601_duration(duration_str)
+
+            # Check if it's a live stream (has liveStreamingDetails or is currently live)
+            has_live_details = "liveStreamingDetails" in item
+            live_content = item.get("snippet", {}).get("liveBroadcastContent", "none")
+            is_live = has_live_details or live_content in ("live", "upcoming")
+
+            details[video_id] = {
+                "duration_seconds": duration_seconds,
+                "is_live": is_live,
+            }
+
+    except googleapiclient.errors.HttpError as e:
+        logger.error(f"YouTube API error fetching video details: {e}")
+    except Exception as e:
+        logger.error(f"Error fetching video details: {e}")
+
+    return details
+
+
+def filter_shorts_and_streams(
+    client,
+    videos: list[VideoInfo],
+    dry_run: bool = False,
+) -> list[VideoInfo]:
+    """Filter out YouTube Shorts and live streams from video list.
+
+    Args:
+        client: YouTube API client.
+        videos: List of VideoInfo to filter.
+        dry_run: If True, skip filtering (return all videos).
+
+    Returns:
+        Filtered list of videos (excluding shorts and streams).
+    """
+    if not videos:
+        return []
+
+    if dry_run:
+        logger.info("[DRY RUN] Skipping shorts/streams filtering")
+        return videos
+
+    video_ids = [v["id"] for v in videos]
+    details = fetch_video_details(client, video_ids)
+
+    filtered_videos: list[VideoInfo] = []
+    skipped_shorts = 0
+    skipped_streams = 0
+
+    for video in videos:
+        video_id = video["id"]
+        video_details = details.get(video_id)
+
+        if not video_details:
+            # If we couldn't get details, include the video (fail open)
+            filtered_videos.append(video)
+            continue
+
+        duration = video_details["duration_seconds"]
+        is_live = video_details["is_live"]
+
+        if is_live:
+            logger.debug(f"Skipping stream: {video['title']} ({video_id})")
+            skipped_streams += 1
+            continue
+
+        if duration <= SHORTS_MAX_DURATION_SECONDS:
+            logger.debug(
+                f"Skipping short ({duration}s): {video['title']} ({video_id})"
+            )
+            skipped_shorts += 1
+            continue
+
+        filtered_videos.append(video)
+
+    if skipped_shorts > 0 or skipped_streams > 0:
+        logger.info(
+            f"Filtered out {skipped_shorts} short(s) and {skipped_streams} stream(s)"
+        )
+
+    return filtered_videos
