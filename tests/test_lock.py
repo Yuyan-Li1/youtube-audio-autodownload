@@ -159,9 +159,11 @@ class TestLockContext:
         # Create active lock from "another process"
         lock_file.write_text(str(os.getpid()))
 
-        with patch("lock.os.getpid", return_value=12345):
-            with lock_context(lock_file) as acquired:
-                assert acquired is False
+        with (
+            patch("lock.os.getpid", return_value=12345),
+            lock_context(lock_file) as acquired,
+        ):
+            assert acquired is False
 
     def test_lock_released_on_exception(self, tmp_path: Path) -> None:
         """Test that lock is released on exception."""
@@ -181,9 +183,11 @@ class TestLockContext:
             assert outer_acquired is True
             # Second lock attempt should fail (same process owns it)
             # but since it's the same process PID, it will see as active
-            with patch("lock._is_process_running", return_value=True):
-                with lock_context(lock_file) as inner_acquired:
-                    assert inner_acquired is False
+            with (
+                patch("lock._is_process_running", return_value=True),
+                lock_context(lock_file) as inner_acquired,
+            ):
+                assert inner_acquired is False
 
 
 class TestLockError:

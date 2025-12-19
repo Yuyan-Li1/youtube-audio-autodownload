@@ -3,6 +3,7 @@
 Uses a simple file-based lock with PID verification to handle stale locks.
 """
 
+import contextlib
 import logging
 import os
 from collections.abc import Generator
@@ -46,10 +47,8 @@ def acquire_lock(lock_file: Path = DEFAULT_LOCK_FILE) -> bool:
                     lock_file.unlink()
         except (ValueError, OSError) as e:
             logger.warning(f"Invalid lock file, removing: {e}")
-            try:
+            with contextlib.suppress(OSError):
                 lock_file.unlink()
-            except OSError:
-                pass
 
     # Create lock file with our PID
     try:

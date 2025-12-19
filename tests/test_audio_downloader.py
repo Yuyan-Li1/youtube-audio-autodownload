@@ -326,11 +326,13 @@ class TestRun:
                         successful=[],
                         failed=[DownloadResult("vid1", "Video 1", "UC1", False, error="Failed")],
                     )
-                    with patch("audio_downloader.save_history"):
-                        with patch("audio_downloader.move_audio_files") as mock_move:
-                            mock_move.return_value = BatchMoveResult()
+                    with (
+                        patch("audio_downloader.save_history"),
+                        patch("audio_downloader.move_audio_files") as mock_move,
+                    ):
+                        mock_move.return_value = BatchMoveResult()
 
-                            result = run(config)
+                        result = run(config)
 
         assert result == 1  # Should return error code
 
@@ -365,12 +367,14 @@ class TestMain:
             dry_run=True,
         )
 
-        with patch("audio_downloader.load_config", return_value=config):
-            with patch("audio_downloader.lock_context") as mock_lock:
-                mock_lock.return_value.__enter__ = MagicMock(return_value=False)
-                mock_lock.return_value.__exit__ = MagicMock(return_value=False)
-                with patch("sys.argv", ["audio_downloader.py"]):
-                    result = main()
+        with (
+            patch("audio_downloader.load_config", return_value=config),
+            patch("audio_downloader.lock_context") as mock_lock,
+        ):
+            mock_lock.return_value.__enter__ = MagicMock(return_value=False)
+            mock_lock.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("sys.argv", ["audio_downloader.py"]):
+                result = main()
 
         assert result == 1
 
@@ -390,13 +394,17 @@ class TestMain:
             dry_run=True,
         )
 
-        with patch("audio_downloader.load_config", return_value=config):
-            with patch("audio_downloader.lock_context") as mock_lock:
-                mock_lock.return_value.__enter__ = MagicMock(return_value=True)
-                mock_lock.return_value.__exit__ = MagicMock(return_value=False)
-                with patch("audio_downloader.run", side_effect=RuntimeError("Unexpected")):
-                    with patch("sys.argv", ["audio_downloader.py"]):
-                        result = main()
+        with (
+            patch("audio_downloader.load_config", return_value=config),
+            patch("audio_downloader.lock_context") as mock_lock,
+        ):
+            mock_lock.return_value.__enter__ = MagicMock(return_value=True)
+            mock_lock.return_value.__exit__ = MagicMock(return_value=False)
+            with (
+                patch("audio_downloader.run", side_effect=RuntimeError("Unexpected")),
+                patch("sys.argv", ["audio_downloader.py"]),
+            ):
+                result = main()
 
         assert result == 1
 
@@ -418,13 +426,17 @@ class TestMain:
         (tmp_path / "downloads").mkdir()
         (tmp_path / "target").mkdir()
 
-        with patch("audio_downloader.load_config", return_value=config):
-            with patch("audio_downloader.lock_context") as mock_lock:
-                mock_lock.return_value.__enter__ = MagicMock(return_value=True)
-                mock_lock.return_value.__exit__ = MagicMock(return_value=False)
-                with patch("audio_downloader.run", return_value=0):
-                    with patch("sys.argv", ["audio_downloader.py", "--debug"]):
-                        result = main()
+        with (
+            patch("audio_downloader.load_config", return_value=config),
+            patch("audio_downloader.lock_context") as mock_lock,
+        ):
+            mock_lock.return_value.__enter__ = MagicMock(return_value=True)
+            mock_lock.return_value.__exit__ = MagicMock(return_value=False)
+            with (
+                patch("audio_downloader.run", return_value=0),
+                patch("sys.argv", ["audio_downloader.py", "--debug"]),
+            ):
+                result = main()
 
         assert result == 0
 
@@ -446,13 +458,17 @@ class TestMain:
         (tmp_path / "downloads").mkdir()
         (tmp_path / "target").mkdir()
 
-        with patch("audio_downloader.load_config", return_value=config) as mock_load:
-            with patch("audio_downloader.lock_context") as mock_lock:
-                mock_lock.return_value.__enter__ = MagicMock(return_value=True)
-                mock_lock.return_value.__exit__ = MagicMock(return_value=False)
-                with patch("audio_downloader.run", return_value=0):
-                    with patch("sys.argv", ["audio_downloader.py", "--dry-run"]):
-                        result = main()
+        with (
+            patch("audio_downloader.load_config", return_value=config) as mock_load,
+            patch("audio_downloader.lock_context") as mock_lock,
+        ):
+            mock_lock.return_value.__enter__ = MagicMock(return_value=True)
+            mock_lock.return_value.__exit__ = MagicMock(return_value=False)
+            with (
+                patch("audio_downloader.run", return_value=0),
+                patch("sys.argv", ["audio_downloader.py", "--dry-run"]),
+            ):
+                result = main()
 
             # Verify dry_run was passed to load_config
             mock_load.assert_called_once_with(dry_run=True)

@@ -3,6 +3,7 @@
 Loads all configuration from environment variables and files in one place at startup.
 """
 
+import contextlib
 import logging
 import os
 import warnings
@@ -67,11 +68,9 @@ def _validate_path_safety(path: Path, name: str, base_dir: Path | None = None) -
     # If base_dir is provided, ensure path is within it
     if base_dir is not None:
         base_resolved = base_dir.resolve()
-        try:
+        # Path is not relative to base - that's OK for some paths
+        with contextlib.suppress(ValueError):
             resolved.relative_to(base_resolved)
-        except ValueError:
-            # Path is not relative to base - that's OK for some paths
-            pass
 
 
 def _parse_audio_extensions(extensions_str: str) -> frozenset[str]:
@@ -144,7 +143,9 @@ def load_config(env_file: Path | None = None, dry_run: bool = False) -> Config:
         if lookback_days < 1:
             raise ValueError("Must be positive")
     except ValueError:
-        raise ConfigError(f"LOOKBACK_DAYS must be a positive integer, got: {lookback_days_str}")
+        raise ConfigError(
+            f"LOOKBACK_DAYS must be a positive integer, got: {lookback_days_str}"
+        ) from None
 
     # Optional: History file path (default: ./download_history.json)
     history_file_str = os.getenv("HISTORY_FILE", str(base_dir / "download_history.json"))
@@ -160,7 +161,7 @@ def load_config(env_file: Path | None = None, dry_run: bool = False) -> Config:
     except ValueError:
         raise ConfigError(
             f"HISTORY_MAX_AGE_DAYS must be a positive integer, got: {history_max_age_str}"
-        )
+        ) from None
 
     # Optional: Audio extensions (default: common audio formats including flac)
     audio_extensions_str = os.getenv("AUDIO_EXTENSIONS", DEFAULT_AUDIO_EXTENSIONS)

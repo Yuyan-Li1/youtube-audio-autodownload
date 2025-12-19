@@ -153,9 +153,9 @@ class TestLoadConfig:
                 },
             ),
             patch("config._load_channel_ids", return_value=["UCchannel1"]),
+            patch("config._get_api_key", return_value="test_key"),
         ):
-            with patch("config._get_api_key", return_value="test_key"):
-                config = load_config()
+            config = load_config()
 
         assert config.api_key == "test_key"
         assert config.channel_ids == ("UCchannel1",)
@@ -165,17 +165,18 @@ class TestLoadConfig:
         """Test that missing TARGET_DIRECTORY raises ConfigError."""
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("TARGET_DIRECTORY", None)
-            with patch("config._get_api_key", return_value="test_key"):
+            with patch("config._get_api_key", return_value="test_key"):  # noqa: SIM117
                 with patch("config._load_channel_ids", return_value=["UCchannel1"]):
-                    with pytest.raises(ConfigError, match="TARGET_DIRECTORY"):
-                        load_config()
+                    with patch("config.load_dotenv"):  # Prevent loading from .env file
+                        with pytest.raises(ConfigError, match="TARGET_DIRECTORY"):
+                            load_config()
 
     def test_invalid_lookback_days_raises(self, tmp_path: Path) -> None:
         """Test that invalid LOOKBACK_DAYS raises ConfigError."""
         target_dir = tmp_path / "target"
         target_dir.mkdir()
 
-        with (
+        with (  # noqa: SIM117
             patch.dict(
                 os.environ,
                 {
@@ -184,17 +185,17 @@ class TestLoadConfig:
                 },
             ),
             patch("config._get_api_key", return_value="test_key"),
+            patch("config._load_channel_ids", return_value=["UCchannel1"]),
         ):
-            with patch("config._load_channel_ids", return_value=["UCchannel1"]):
-                with pytest.raises(ConfigError, match="LOOKBACK_DAYS"):
-                    load_config()
+            with pytest.raises(ConfigError, match="LOOKBACK_DAYS"):
+                load_config()
 
     def test_negative_lookback_days_raises(self, tmp_path: Path) -> None:
         """Test that negative LOOKBACK_DAYS raises ConfigError."""
         target_dir = tmp_path / "target"
         target_dir.mkdir()
 
-        with (
+        with (  # noqa: SIM117
             patch.dict(
                 os.environ,
                 {
@@ -203,17 +204,17 @@ class TestLoadConfig:
                 },
             ),
             patch("config._get_api_key", return_value="test_key"),
+            patch("config._load_channel_ids", return_value=["UCchannel1"]),
         ):
-            with patch("config._load_channel_ids", return_value=["UCchannel1"]):
-                with pytest.raises(ConfigError, match="LOOKBACK_DAYS"):
-                    load_config()
+            with pytest.raises(ConfigError, match="LOOKBACK_DAYS"):
+                load_config()
 
     def test_invalid_log_level_raises(self, tmp_path: Path) -> None:
         """Test that invalid LOG_LEVEL raises ConfigError."""
         target_dir = tmp_path / "target"
         target_dir.mkdir()
 
-        with (
+        with (  # noqa: SIM117
             patch.dict(
                 os.environ,
                 {
@@ -222,14 +223,14 @@ class TestLoadConfig:
                 },
             ),
             patch("config._get_api_key", return_value="test_key"),
+            patch("config._load_channel_ids", return_value=["UCchannel1"]),
         ):
-            with patch("config._load_channel_ids", return_value=["UCchannel1"]):
-                with pytest.raises(ConfigError, match="LOG_LEVEL"):
-                    load_config()
+            with pytest.raises(ConfigError, match="LOG_LEVEL"):
+                load_config()
 
     def test_nonexistent_target_directory_raises(self, tmp_path: Path) -> None:
         """Test that nonexistent target directory raises ConfigError."""
-        with (
+        with (  # noqa: SIM117
             patch.dict(
                 os.environ,
                 {
@@ -237,10 +238,10 @@ class TestLoadConfig:
                 },
             ),
             patch("config._get_api_key", return_value="test_key"),
+            patch("config._load_channel_ids", return_value=["UCchannel1"]),
         ):
-            with patch("config._load_channel_ids", return_value=["UCchannel1"]):
-                with pytest.raises(ConfigError, match="does not exist"):
-                    load_config()
+            with pytest.raises(ConfigError, match="does not exist"):
+                load_config()
 
     def test_dry_run_mode(self, tmp_path: Path) -> None:
         """Test that dry_run flag is set correctly."""
@@ -255,9 +256,9 @@ class TestLoadConfig:
                 },
             ),
             patch("config._get_api_key", return_value="test_key"),
+            patch("config._load_channel_ids", return_value=["UCchannel1"]),
         ):
-            with patch("config._load_channel_ids", return_value=["UCchannel1"]):
-                config = load_config(dry_run=True)
+            config = load_config(dry_run=True)
 
         assert config.dry_run is True
 
@@ -266,7 +267,7 @@ class TestLoadConfig:
         target_dir = tmp_path / "target"
         target_dir.mkdir()
 
-        with (
+        with (  # noqa: SIM117
             patch.dict(
                 os.environ,
                 {
@@ -275,10 +276,10 @@ class TestLoadConfig:
                 },
             ),
             patch("config._get_api_key", return_value="test_key"),
+            patch("config._load_channel_ids", return_value=["UCchannel1"]),
         ):
-            with patch("config._load_channel_ids", return_value=["UCchannel1"]):
-                with pytest.raises(ConfigError, match="HISTORY_MAX_AGE_DAYS"):
-                    load_config()
+            with pytest.raises(ConfigError, match="HISTORY_MAX_AGE_DAYS"):
+                load_config()
 
 
 class TestConfig:
