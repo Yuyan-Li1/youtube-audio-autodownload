@@ -13,7 +13,7 @@ from audio_downloader import (
     setup_logging,
     update_history_with_results,
 )
-from config import Config
+from config import Config, ConfigError
 from downloader import BatchDownloadResult, DownloadResult
 from file_ops import BatchMoveResult, MoveResult
 from history import DownloadHistory
@@ -153,7 +153,7 @@ class TestLogSummary:
         assert "1 successful" in caplog.text
         assert "0 failed" in caplog.text
 
-    def test_logs_failed_downloads(self, tmp_path: Path, caplog) -> None:
+    def test_logs_failed_downloads(self, caplog) -> None:
         """Test logging summary with failed downloads."""
         download_results = BatchDownloadResult(
             successful=[],
@@ -342,7 +342,6 @@ class TestMain:
 
     def test_main_config_error(self) -> None:
         """Test main with configuration error."""
-        from config import ConfigError
 
         with patch("audio_downloader.load_config") as mock_load:
             mock_load.side_effect = ConfigError("Missing API key")

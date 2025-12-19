@@ -62,7 +62,7 @@ def load_history(history_file: Path) -> DownloadHistory:
         DownloadHistory object. Returns empty history if file doesn't exist.
     """
     if not history_file.exists():
-        logger.info(f"No history file found at {history_file}, starting fresh")
+        logger.info("No history file found at %s, starting fresh", history_file)
         return DownloadHistory(downloaded_videos={})
 
     try:
@@ -70,14 +70,14 @@ def load_history(history_file: Path) -> DownloadHistory:
             data = json.load(f)
 
         downloaded = data.get("downloaded_videos", {})
-        logger.info(f"Loaded history with {len(downloaded)} videos")
+        logger.info("Loaded history with %s videos", len(downloaded))
         return DownloadHistory(downloaded_videos=downloaded)
 
     except json.JSONDecodeError as e:
-        logger.warning(f"Corrupted history file, starting fresh: {e}")
+        logger.warning("Corrupted history file, starting fresh: %s", e)
         return DownloadHistory(downloaded_videos={})
-    except Exception as e:
-        logger.error(f"Error loading history: {e}")
+    except OSError as e:
+        logger.error("Error loading history: %s", e)
         return DownloadHistory(downloaded_videos={})
 
 
@@ -106,18 +106,18 @@ def save_history(history: DownloadHistory, history_file: Path) -> bool:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
         temp_file.replace(history_file)
-        logger.debug(f"Saved history with {len(history.downloaded_videos)} videos")
+        logger.debug("Saved history with %s videos", len(history.downloaded_videos))
         return True
 
-    except Exception as e:
-        logger.error(f"Error saving history: {e}")
+    except OSError as e:
+        logger.error("Error saving history: %s", e)
         # Clean up temp file on failure
         try:
             if temp_file.exists():
                 temp_file.unlink()
-                logger.debug(f"Cleaned up temp file: {temp_file}")
-        except Exception as cleanup_error:
-            logger.warning(f"Failed to clean up temp file {temp_file}: {cleanup_error}")
+                logger.debug("Cleaned up temp file: %s", temp_file)
+        except OSError as cleanup_error:
+            logger.warning("Failed to clean up temp file %s: %s", temp_file, cleanup_error)
         return False
 
 
@@ -167,7 +167,7 @@ def filter_new_videos(
     new_videos = [v for v in videos if v["id"] not in downloaded_ids]
     skipped = len(videos) - len(new_videos)
     if skipped > 0:
-        logger.debug(f"Filtered out {skipped} already downloaded videos")
+        logger.debug("Filtered out %s already downloaded videos", skipped)
     return new_videos
 
 
@@ -197,6 +197,6 @@ def cleanup_old_entries(
 
     removed = len(history.downloaded_videos) - len(new_videos)
     if removed > 0:
-        logger.info(f"Cleaned up {removed} entries older than {max_age_days} days")
+        logger.info("Cleaned up %s entries older than %s days", removed, max_age_days)
 
     return DownloadHistory(downloaded_videos=new_videos)

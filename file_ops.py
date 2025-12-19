@@ -58,15 +58,15 @@ def move_file(source: Path, target_dir: Path) -> MoveResult:
 
     try:
         shutil.move(str(source), str(destination))
-        logger.debug(f"Moved: {source.name}")
+        logger.debug("Moved: %s", source.name)
         return MoveResult(
             source=source,
             destination=destination,
             success=True,
         )
-    except Exception as e:
+    except OSError as e:
         error_msg = str(e)
-        logger.error(f"Failed to move {source.name}: {error_msg}")
+        logger.error("Failed to move %s: %s", source.name, error_msg)
         return MoveResult(
             source=source,
             destination=destination,
@@ -98,11 +98,11 @@ def move_audio_files(
         audio_extensions = {".m4a", ".mp3", ".opus", ".webm", ".aac", ".ogg", ".wav", ".flac"}
 
     if not source_dir.exists():
-        logger.warning(f"Source directory does not exist: {source_dir}")
+        logger.warning("Source directory does not exist: %s", source_dir)
         return result
 
     if not target_dir.exists():
-        logger.error(f"Target directory does not exist: {target_dir}")
+        logger.error("Target directory does not exist: %s", target_dir)
         return result
 
     # Get all files in source directory
@@ -119,7 +119,7 @@ def move_audio_files(
         logger.info("No audio files found to move")
         return result
 
-    logger.info(f"Moving {len(audio_files)} audio file(s) to {target_dir}")
+    logger.info("Moving %s audio file(s) to %s", len(audio_files), target_dir)
 
     for source_file in audio_files:
         move_result = move_file(source_file, target_dir)
@@ -129,7 +129,9 @@ def move_audio_files(
         else:
             result.failed.append(move_result)
 
-    logger.info(f"Move complete: {result.success_count} successful, {result.failure_count} failed")
+    logger.info(
+        "Move complete: %s successful, %s failed", result.success_count, result.failure_count
+    )
 
     return result
 
@@ -146,8 +148,8 @@ def ensure_directory(path: Path) -> bool:
     try:
         path.mkdir(parents=True, exist_ok=True)
         return True
-    except Exception as e:
-        logger.error(f"Failed to create directory {path}: {e}")
+    except OSError as e:
+        logger.error("Failed to create directory %s: %s", path, e)
         return False
 
 

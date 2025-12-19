@@ -19,8 +19,6 @@ DEFAULT_LOCK_FILE = Path(__file__).parent / "youtube_downloader.lock"
 class LockError(Exception):
     """Raised when unable to acquire lock."""
 
-    pass
-
 
 def acquire_lock(lock_file: Path = DEFAULT_LOCK_FILE) -> bool:
     """Attempt to acquire the lock.
@@ -40,23 +38,23 @@ def acquire_lock(lock_file: Path = DEFAULT_LOCK_FILE) -> bool:
                 pid = int(pid_str)
                 # Check if process is still running
                 if _is_process_running(pid):
-                    logger.warning(f"Another instance is running (PID: {pid})")
+                    logger.warning("Another instance is running (PID: %s)", pid)
                     return False
                 else:
-                    logger.info(f"Stale lock file found (PID {pid} not running), removing")
+                    logger.info("Stale lock file found (PID %s not running), removing", pid)
                     lock_file.unlink()
         except (ValueError, OSError) as e:
-            logger.warning(f"Invalid lock file, removing: {e}")
+            logger.warning("Invalid lock file, removing: %s", e)
             with contextlib.suppress(OSError):
                 lock_file.unlink()
 
     # Create lock file with our PID
     try:
         lock_file.write_text(str(os.getpid()))
-        logger.debug(f"Lock acquired (PID: {os.getpid()})")
+        logger.debug("Lock acquired (PID: %s)", os.getpid())
         return True
     except OSError as e:
-        logger.error(f"Failed to create lock file: {e}")
+        logger.error("Failed to create lock file: %s", e)
         return False
 
 
@@ -82,7 +80,7 @@ def release_lock(lock_file: Path = DEFAULT_LOCK_FILE) -> bool:
                 return False
         return True
     except (ValueError, OSError) as e:
-        logger.error(f"Error releasing lock: {e}")
+        logger.error("Error releasing lock: %s", e)
         return False
 
 
@@ -125,6 +123,6 @@ def _is_process_running(pid: int) -> bool:
         return True
     except OSError:
         return False
-    except Exception:
-        # On Windows or other platforms, assume not running if we can't check
+    except (ValueError, TypeError):
+        # Invalid PID type or value
         return False

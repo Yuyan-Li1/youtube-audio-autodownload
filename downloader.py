@@ -92,26 +92,33 @@ def _download_with_retry(
 
             # Check if this is a permanent error (don't retry)
             if _is_permanent_error(last_error):
-                logger.error(f"Permanent error for {title}: {last_error}")
+                logger.error("Permanent error for %s: %s", title, last_error)
                 break
 
             # Retry with backoff if we have attempts left
             if attempt < max_retries:
                 backoff = initial_backoff * (2**attempt)
                 logger.warning(
-                    f"Download failed for {title}, retrying in {backoff}s "
-                    f"(attempt {attempt + 1}/{max_retries + 1}): {last_error}"
+                    "Download failed for %s, retrying in %ss (attempt %s/%s): %s",
+                    title,
+                    backoff,
+                    attempt + 1,
+                    max_retries + 1,
+                    last_error,
                 )
                 time.sleep(backoff)
             else:
                 logger.error(
-                    f"Download failed for {title} after {max_retries + 1} attempts: {last_error}"
+                    "Download failed for %s after %s attempts: %s",
+                    title,
+                    max_retries + 1,
+                    last_error,
                 )
 
-        except Exception as e:
+        except (OSError, ValueError, KeyError, RuntimeError, TypeError) as e:
             last_error = str(e)
             retry_count = attempt
-            logger.error(f"Unexpected error downloading {title}: {last_error}")
+            logger.error("Unexpected error downloading %s: %s", title, last_error)
             break
 
     return False, last_error, retry_count
@@ -182,9 +189,9 @@ def download_audio(
 
     if success:
         if retry_count > 0:
-            logger.info(f"Downloaded: {title or video_id} (after {retry_count} retries)")
+            logger.info("Downloaded: %s (after %s retries)", title or video_id, retry_count)
         else:
-            logger.info(f"Downloaded: {title or video_id}")
+            logger.info("Downloaded: %s", title or video_id)
 
     return DownloadResult(
         video_id=video_id,
@@ -219,7 +226,7 @@ def download_videos(
         logger.info("No videos to download")
         return result
 
-    logger.info(f"Downloading {len(videos)} video(s)...")
+    logger.info("Downloading %s video(s)...", len(videos))
 
     for video in videos:
         download_result = download_audio(
@@ -237,7 +244,7 @@ def download_videos(
             result.failed.append(download_result)
 
     logger.info(
-        f"Download complete: {result.success_count} successful, {result.failure_count} failed"
+        "Download complete: %s successful, %s failed", result.success_count, result.failure_count
     )
 
     return result

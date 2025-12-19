@@ -9,7 +9,9 @@ Automatically download audio from YouTube videos and move them to your podcast a
 - **Lock file**: Prevents concurrent runs from cron
 - **Download history**: Tracks what was downloaded and when
 - **Configurable lookback**: Checks last N days for new videos (default: 7)
+- **Smart filtering**: Automatically skips YouTube Shorts and live streams
 - **Proper logging**: File-based logging for cron job debugging
+- **API quota efficient**: Uses optimized API calls to minimize quota usage
 
 ## Installation
 
@@ -77,6 +79,7 @@ python3 audio_downloader.py --dry-run
 ```
 
 In dry run mode:
+
 - Mock video data is used instead of calling the YouTube API
 - Downloads and file operations work normally
 - Perfect for testing configuration and downloads without using API quota
@@ -125,15 +128,33 @@ TARGET_DIRECTORY=/Users/yourusername/Library/Mobile Documents/iCloud~co~supertop
 1. **Load configuration**: Reads all settings from `.env` and `channel_ids`
 2. **Check history**: Loads `download_history.json` to see what's already downloaded
 3. **Fetch videos**: Queries YouTube API for videos from the last N days
-4. **Filter**: Removes already downloaded videos from the list
-5. **Download**: Downloads audio using yt-dlp
-6. **Update history**: Records successful downloads
-7. **Move files**: Moves audio files to the target directory
+4. **Filter shorts and streams**: Automatically removes:
+   - YouTube Shorts (videos ≤60 seconds)
+   - Live streams (active, upcoming, and completed stream VODs)
+5. **Filter downloaded**: Removes already downloaded videos from the list
+6. **Download**: Downloads audio using yt-dlp
+7. **Update history**: Records successful downloads
+8. **Move files**: Moves audio files to the target directory
 
 The download history ensures:
+
 - Videos are never downloaded twice
 - Failed downloads are automatically retried on the next run
 - The script is safe to run at any frequency
+
+### Filtering Details
+
+**YouTube Shorts**: Videos with duration of 60 seconds or less are automatically skipped, as they're typically not suitable for podcast-style listening.
+
+**Live Streams**: All live stream content is filtered out, including:
+
+- Active live streams
+- Upcoming scheduled streams
+- Completed live stream VODs (past broadcasts)
+
+If you want to include completed stream VODs, you can modify the detection logic in `youtube_api.py`.
+
+**API Quota Impact**: The filtering feature uses the efficient `videos.list` API call (1 quota unit per 50 videos), keeping the total quota usage very low (~3 units per channel).
 
 ## Files
 
@@ -155,6 +176,7 @@ The download history ensures:
 If you were using the old version with `API_key` file and `last_download_time`:
 
 1. Move your API key to `.env`:
+
    ```bash
    echo "YOUTUBE_API_KEY=$(cat API_key)" >> .env
    ```
@@ -181,6 +203,7 @@ See `requirements.txt` for full list.
 ### Cron job not working
 
 1. Enable file logging in `.env`:
+
    ```
    LOG_FILE=./logs/downloader.log
    LOG_LEVEL=DEBUG
@@ -198,9 +221,14 @@ See `requirements.txt` for full list.
 
 ### API quota exceeded
 
-- YouTube API has daily quotas
+- YouTube API has daily quotas (default: 10,000 units per day)
+- This script uses ~3 quota units per channel:
+  - channels.list: 1 unit (get uploads playlist ID, usually cached)
+  - playlistItems.list: 1 unit (get videos from playlist)
+  - videos.list: 1 unit per batch of up to 50 videos (for shorts/stream filtering)
 - Reduce `LOOKBACK_DAYS` if you're checking too many days
 - Reduce the number of channels you're monitoring
+- Use `--dry-run` mode for testing without consuming quota
 
 ## License
 

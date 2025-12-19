@@ -99,6 +99,7 @@ class TestDownloadWithRetry:
 
         assert success is True
         assert error is None
+        assert retry_count == 1
 
     def test_no_retry_on_permanent_error(self, tmp_path: Path) -> None:
         """Test that permanent errors don't trigger retry."""
@@ -118,6 +119,7 @@ class TestDownloadWithRetry:
 
         assert success is False
         assert "Video unavailable" in error
+        assert retry_count == 0
         mock_sleep.assert_not_called()
 
     def test_max_retries_exceeded(self, tmp_path: Path) -> None:
@@ -157,6 +159,7 @@ class TestDownloadWithRetry:
 
         assert success is False
         assert "Unexpected error" in error
+        assert retry_count == 0
 
 
 class TestDownloadAudio:

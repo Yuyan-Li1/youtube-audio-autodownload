@@ -28,7 +28,12 @@ from history import (
     save_history,
 )
 from lock import lock_context
-from youtube_api import VideoInfo, create_youtube_client, fetch_all_channels_videos
+from youtube_api import (
+    VideoInfo,
+    create_youtube_client,
+    fetch_all_channels_videos,
+    filter_shorts_and_streams,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +81,11 @@ def run(config: Config) -> int:
     # 1. Load download history
     history = load_history(config.history_file)
     downloaded_ids = history.get_downloaded_ids()
-    logger.info(f"Loaded history with {len(downloaded_ids)} previously downloaded videos")
+    logger.info("Loaded history with %s previously downloaded videos", len(downloaded_ids))
 
     # 2. Calculate lookback window
     since_date = datetime.now(UTC) - timedelta(days=config.lookback_days)
-    logger.info(f"Checking for videos published since {since_date.date()}")
+    logger.info("Checking for videos published since %s", since_date.date())
 
     # 3. Create YouTube client and fetch videos from all channels
     client = create_youtube_client(config.api_key)
@@ -92,32 +97,39 @@ def run(config: Config) -> int:
         logger.info("No videos found in the lookback window")
         return 0
 
-    # 4. Filter out already downloaded videos (idempotent operation)
+    # 4. Filter out shorts and streams
+    all_videos = filter_shorts_and_streams(client, all_videos, dry_run=config.dry_run)
+
+    if not all_videos:
+        logger.info("No regular videos found (all were shorts or streams)")
+        return 0
+
+    # 5. Filter out already downloaded videos (idempotent operation)
     new_videos = filter_new_videos(all_videos, downloaded_ids)
 
     if not new_videos:
         logger.info("All videos already downloaded, nothing to do")
         return 0
 
-    logger.info(f"Found {len(new_videos)} new video(s) to download")
+    logger.info("Found %s new video(s) to download", len(new_videos))
 
-    # 5. Download each video
+    # 6. Download each video
     download_results = download_videos(new_videos, config.download_dir)
 
-    # 6. Update history with successful downloads
+    # 7. Update history with successful downloads
     history = update_history_with_results(history, download_results, new_videos)
 
-    # 7. Cleanup old history entries
+    # 8. Cleanup old history entries
     history = cleanup_old_entries(history, max_age_days=config.history_max_age_days)
 
-    # 8. Save history once (after both update and cleanup)
+    # 9. Save history once (after both update and cleanup)
     if not save_history(history, config.history_file):
         logger.error("Failed to save history file")
 
-    # 9. Move downloaded files to target directory
+    # 10. Move downloaded files to target directory
     move_results = move_audio_files(config.download_dir, config.target_dir, config.audio_extensions)
 
-    # 10. Log summary
+    # 11. Log summary
     log_summary(download_results, move_results)
 
     # Return error if any downloads failed
@@ -170,22 +182,25 @@ def log_summary(
     logger.info("Run Summary")
     logger.info("=" * 50)
     logger.info(
-        f"Downloads: {download_results.success_count} successful, "
-        f"{download_results.failure_count} failed"
+        "Downloads: %s successful, %s failed",
+        download_results.success_count,
+        download_results.failure_count,
     )
     logger.info(
-        f"Files moved: {move_results.success_count} successful, {move_results.failure_count} failed"
+        "Files moved: %s successful, %s failed",
+        move_results.success_count,
+        move_results.failure_count,
     )
 
     if download_results.failed:
         logger.warning("Failed downloads:")
         for failure in download_results.failed:
-            logger.warning(f"  - {failure.title}: {failure.error}")
+            logger.warning("  - %s: %s", failure.title, failure.error)
 
     if move_results.failed:
         logger.warning("Failed moves:")
         for failure in move_results.failed:
-            logger.warning(f"  - {failure.source.name}: {failure.error}")
+            logger.warning("  - %s: %s", failure.source.name, failure.error)
 
     logger.info("=" * 50)
 
@@ -238,8 +253,8 @@ def main() -> int:
 
         try:
             return run(config)
-        except Exception as e:
-            logger.exception(f"Unexpected error: {e}")
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.exception("Unexpected error: %s", e)
             return 1
         finally:
             logger.info("Done")
