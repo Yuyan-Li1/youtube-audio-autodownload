@@ -113,16 +113,17 @@ def run(config: Config) -> int:
     # 6. Update history with successful downloads
     history = update_history_with_results(history, download_results, new_videos)
 
-    # 7. Save updated history
+    # 7. Cleanup old history entries
+    history = cleanup_old_entries(history, max_age_days=config.history_max_age_days)
+
+    # 8. Save history once (after both update and cleanup)
     if not save_history(history, config.history_file):
         logger.error("Failed to save history file")
 
-    # 8. Move downloaded files to target directory
-    move_results = move_audio_files(config.download_dir, config.target_dir)
-
-    # 9. Cleanup old history entries periodically
-    history = cleanup_old_entries(history, max_age_days=90)
-    save_history(history, config.history_file)
+    # 9. Move downloaded files to target directory
+    move_results = move_audio_files(
+        config.download_dir, config.target_dir, config.audio_extensions
+    )
 
     # 10. Log summary
     log_summary(download_results, move_results)

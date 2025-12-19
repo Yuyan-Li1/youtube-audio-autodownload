@@ -77,20 +77,27 @@ def move_file(source: Path, target_dir: Path) -> MoveResult:
         )
 
 
-def move_audio_files(source_dir: Path, target_dir: Path) -> BatchMoveResult:
+def move_audio_files(
+    source_dir: Path,
+    target_dir: Path,
+    audio_extensions: frozenset[str] | set[str] | None = None,
+) -> BatchMoveResult:
     """Move all audio files from source to target directory.
 
     Args:
         source_dir: Directory containing downloaded audio files.
         target_dir: Directory to move files to.
+        audio_extensions: Set of audio file extensions to move (e.g., {".m4a", ".mp3"}).
+                         If None, uses default set.
 
     Returns:
         BatchMoveResult with successful and failed moves.
     """
     result = BatchMoveResult()
 
-    # Common audio file extensions
-    audio_extensions = {".m4a", ".mp3", ".opus", ".webm", ".aac", ".ogg", ".wav"}
+    # Use provided extensions or default set (including .flac)
+    if audio_extensions is None:
+        audio_extensions = {".m4a", ".mp3", ".opus", ".webm", ".aac", ".ogg", ".wav", ".flac"}
 
     if not source_dir.exists():
         logger.warning(f"Source directory does not exist: {source_dir}")
