@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from youtube_api import VideoInfo
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,6 +85,8 @@ def load_history(history_file: Path) -> DownloadHistory:
 def save_history(history: DownloadHistory, history_file: Path) -> bool:
     """Save download history to JSON file.
 
+    Uses atomic write pattern with temp file cleanup on failure.
+
     Args:
         history: The history to save.
         history_file: Path to save to.
@@ -90,6 +94,8 @@ def save_history(history: DownloadHistory, history_file: Path) -> bool:
     Returns:
         True if successful, False otherwise.
     """
+    temp_file = history_file.with_suffix(".tmp")
+
     try:
         # Ensure parent directory exists
         history_file.parent.mkdir(parents=True, exist_ok=True)
@@ -97,7 +103,6 @@ def save_history(history: DownloadHistory, history_file: Path) -> bool:
         data = {"downloaded_videos": history.downloaded_videos}
 
         # Write atomically by writing to temp file first
-        temp_file = history_file.with_suffix(".tmp")
         with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -107,6 +112,13 @@ def save_history(history: DownloadHistory, history_file: Path) -> bool:
 
     except Exception as e:
         logger.error(f"Error saving history: {e}")
+        # Clean up temp file on failure
+        try:
+            if temp_file.exists():
+                temp_file.unlink()
+                logger.debug(f"Cleaned up temp file: {temp_file}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to clean up temp file {temp_file}: {cleanup_error}")
         return False
 
 
@@ -139,15 +151,15 @@ def create_video_record(
 
 
 def filter_new_videos(
-    videos: list[dict],
+    videos: list[VideoInfo],
     downloaded_ids: frozenset[str],
-) -> list[dict]:
+) -> list[VideoInfo]:
     """Filter out videos that have already been downloaded.
 
     This is a pure function - no side effects.
 
     Args:
-        videos: List of video dictionaries with 'id' key.
+        videos: List of VideoInfo dictionaries.
         downloaded_ids: Set of already downloaded video IDs.
 
     Returns:
@@ -162,7 +174,7 @@ def filter_new_videos(
 
 def cleanup_old_entries(
     history: DownloadHistory,
-    max_age_days: int = 90,
+    max_age_days: int,
 ) -> DownloadHistory:
     """Remove entries older than max_age_days.
 
