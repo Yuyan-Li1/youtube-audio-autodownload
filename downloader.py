@@ -138,7 +138,9 @@ def _is_permanent_error(error_msg: str) -> bool:
         "copyright claim",
         "This video is no longer available",
     ]
-    return any(indicator.lower() in error_msg.lower() for indicator in permanent_indicators)
+    return any(
+        indicator.lower() in error_msg.lower() for indicator in permanent_indicators
+    )
 
 
 def download_audio(
@@ -186,7 +188,9 @@ def download_audio(
 
     if success:
         if retry_count > 0:
-            logger.info(f"Downloaded: {title or video_id} (after {retry_count} retries)")
+            logger.info(
+                f"Downloaded: {title or video_id} (after {retry_count} retries)"
+            )
         else:
             logger.info(f"Downloaded: {title or video_id}")
 

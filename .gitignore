@@ -1,6 +1,7 @@
 # Environment and secrets
 .env
 API_key
+channel_ids
 
 # Download history (per-installation state)
 download_history.json
@@ -60,3 +61,4 @@ ENV/
 .DS_Store
 .AppleDouble
 .LSOverride
+
