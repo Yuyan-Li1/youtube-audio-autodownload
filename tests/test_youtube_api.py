@@ -4,14 +4,19 @@ import os
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import googleapiclient.errors
+
 from youtube_api import (
     _create_mock_videos,
     _get_uploads_playlist_id,
+    _parse_iso8601_duration,
     _parse_playlist_response,
     _validate_max_results,
     create_youtube_client,
     fetch_all_channels_videos,
     fetch_channel_videos,
+    fetch_video_details,
+    filter_shorts_and_streams,
 )
 
 
@@ -66,8 +71,6 @@ class TestGetUploadsPlaylistId:
 
     def test_api_error_returns_none(self) -> None:
         """Test that API errors return None."""
-        import googleapiclient.errors
-
         client = MagicMock()
         client.channels().list().execute.side_effect = googleapiclient.errors.HttpError(
             resp=MagicMock(status=403), content=b"Quota exceeded"
@@ -233,8 +236,6 @@ class TestFetchChannelVideos:
 
     def test_handles_api_error(self) -> None:
         """Test that API errors are handled gracefully."""
-        import googleapiclient.errors
-
         client = MagicMock()
         since = datetime(2024, 1, 1, tzinfo=UTC)
 
@@ -243,7 +244,7 @@ class TestFetchChannelVideos:
         )
 
         result = fetch_channel_videos(client, "UCtest", since, dry_run=False)
-        assert result == []
+        assert not result
 
     def test_handles_generic_error(self) -> None:
         """Test that generic errors are handled gracefully."""
@@ -253,7 +254,7 @@ class TestFetchChannelVideos:
         client.playlistItems().list().execute.side_effect = Exception("Network error")
 
         result = fetch_channel_videos(client, "UCtest", since, dry_run=False)
-        assert result == []
+        assert not result
 
     def test_no_playlist_returns_empty(self) -> None:
         """Test that no playlist ID returns empty list."""
@@ -263,7 +264,7 @@ class TestFetchChannelVideos:
         with patch("youtube_api._get_uploads_playlist_id", return_value=None):
             result = fetch_channel_videos(client, "NON_UC", since, dry_run=False)
 
-        assert result == []
+        assert not result
 
 
 class TestFetchAllChannelsVideos:
@@ -338,7 +339,7 @@ class TestFetchAllChannelsVideos:
         since = datetime(2024, 1, 1, tzinfo=UTC)
 
         result = fetch_all_channels_videos(client, (), since, dry_run=True)
-        assert result == []
+        assert not result
 
 
 class TestCreateYoutubeClient:
@@ -352,3 +353,430 @@ class TestCreateYoutubeClient:
 
         mock_build.assert_called_once_with("youtube", "v3", developerKey="test_api_key")
         assert client is not None
+
+
+class TestParseISO8601Duration:
+    """Tests for _parse_iso8601_duration function."""
+
+    def test_parses_hours_minutes_seconds(self) -> None:
+        """Test parsing duration with hours, minutes, and seconds."""
+        assert _parse_iso8601_duration("PT1H30M15S") == 5415  # 1*3600 + 30*60 + 15
+
+    def test_parses_seconds_only(self) -> None:
+        """Test parsing duration with only seconds."""
+        assert _parse_iso8601_duration("PT45S") == 45
+
+    def test_parses_minutes_only(self) -> None:
+        """Test parsing duration with only minutes."""
+        assert _parse_iso8601_duration("PT1M") == 60
+
+    def test_parses_hours_only(self) -> None:
+        """Test parsing duration with only hours."""
+        assert _parse_iso8601_duration("PT1H") == 3600
+
+    def test_parses_zero_duration(self) -> None:
+        """Test parsing zero duration."""
+        assert _parse_iso8601_duration("PT0S") == 0
+
+    def test_parses_hours_and_minutes(self) -> None:
+        """Test parsing duration with hours and minutes."""
+        assert _parse_iso8601_duration("PT2H30M") == 9000  # 2*3600 + 30*60
+
+    def test_parses_minutes_and_seconds(self) -> None:
+        """Test parsing duration with minutes and seconds."""
+        assert _parse_iso8601_duration("PT5M30S") == 330  # 5*60 + 30
+
+    def test_handles_malformed_duration(self) -> None:
+        """Test that malformed durations return 0."""
+        assert _parse_iso8601_duration("invalid") == 0
+        assert _parse_iso8601_duration("") == 0
+        assert _parse_iso8601_duration("PT") == 0
+
+    def test_handles_days_component(self) -> None:
+        """Test that days component is converted to hours."""
+        # P1DT2H = 1 day + 2 hours = 26 hours
+        assert _parse_iso8601_duration("P1DT2H") == 93600  # 26*3600
+
+    def test_handles_days_with_full_time(self) -> None:
+        """Test that days with full time components are parsed correctly."""
+        # P1DT1H30M15S = 1 day + 1:30:15 = 25:30:15
+        assert _parse_iso8601_duration("P1DT1H30M15S") == 91815  # 25*3600 + 30*60 + 15
+
+
+class TestFetchVideoDetails:
+    """Tests for fetch_video_details function."""
+
+    def test_empty_input_returns_empty(self) -> None:
+        """Test that empty input returns empty dictionary."""
+        client = MagicMock()
+        result = fetch_video_details(client, [])
+        assert not result
+        client.videos.assert_not_called()
+
+    def test_fetches_video_details(self) -> None:
+        """Test fetching video details from API."""
+        client = MagicMock()
+        client.videos().list().execute.return_value = {
+            "items": [
+                {
+                    "id": "vid123",
+                    "contentDetails": {"duration": "PT10M30S"},
+                    "snippet": {"liveBroadcastContent": "none"},
+                }
+            ]
+        }
+
+        result = fetch_video_details(client, ["vid123"])
+        assert "vid123" in result
+        assert result["vid123"]["duration_seconds"] == 630  # 10*60 + 30
+        assert result["vid123"]["is_live"] is False
+
+    def test_detects_live_streams(self) -> None:
+        """Test detection of live streams."""
+        client = MagicMock()
+        client.videos().list().execute.return_value = {
+            "items": [
+                {
+                    "id": "live_vid",
+                    "contentDetails": {"duration": "PT0S"},
+                    "snippet": {"liveBroadcastContent": "live"},
+                    "liveStreamingDetails": {},
+                }
+            ]
+        }
+
+        result = fetch_video_details(client, ["live_vid"])
+        assert result["live_vid"]["is_live"] is True
+
+    def test_detects_upcoming_streams(self) -> None:
+        """Test detection of upcoming streams."""
+        client = MagicMock()
+        client.videos().list().execute.return_value = {
+            "items": [
+                {
+                    "id": "upcoming_vid",
+                    "contentDetails": {"duration": "PT0S"},
+                    "snippet": {"liveBroadcastContent": "upcoming"},
+                    "liveStreamingDetails": {},
+                }
+            ]
+        }
+
+        result = fetch_video_details(client, ["upcoming_vid"])
+        assert result["upcoming_vid"]["is_live"] is True
+
+    def test_detects_completed_stream_vods(self) -> None:
+        """Test detection of completed live stream VODs."""
+        client = MagicMock()
+        client.videos().list().execute.return_value = {
+            "items": [
+                {
+                    "id": "vod_vid",
+                    "contentDetails": {"duration": "PT1H30M"},
+                    "snippet": {"liveBroadcastContent": "none"},
+                    "liveStreamingDetails": {},  # Has live details but not currently live
+                }
+            ]
+        }
+
+        result = fetch_video_details(client, ["vod_vid"])
+        assert result["vod_vid"]["is_live"] is True  # Filters out completed stream VODs
+
+    def test_detects_shorts(self) -> None:
+        """Test detection of YouTube Shorts (<=60s)."""
+        client = MagicMock()
+        client.videos().list().execute.return_value = {
+            "items": [
+                {
+                    "id": "short_vid",
+                    "contentDetails": {"duration": "PT45S"},
+                    "snippet": {"liveBroadcastContent": "none"},
+                }
+            ]
+        }
+
+        result = fetch_video_details(client, ["short_vid"])
+        assert result["short_vid"]["duration_seconds"] == 45
+        assert result["short_vid"]["is_live"] is False
+
+    def test_handles_api_error(self) -> None:
+        """Test that API errors are handled gracefully."""
+
+        client = MagicMock()
+        client.videos().list().execute.side_effect = googleapiclient.errors.HttpError(
+            resp=MagicMock(status=403), content=b"Quota exceeded"
+        )
+
+        result = fetch_video_details(client, ["vid123"])
+        assert not result
+
+    def test_handles_generic_error(self) -> None:
+        """Test that generic errors are handled gracefully."""
+        client = MagicMock()
+        client.videos().list().execute.side_effect = Exception("Network error")
+
+        result = fetch_video_details(client, ["vid123"])
+        assert not result
+
+    def test_batch_size_limit(self) -> None:
+        """Test that only first 50 videos are processed."""
+        client = MagicMock()
+        client.videos().list().execute.return_value = {"items": []}
+
+        # Create 60 video IDs
+        video_ids = [f"vid{i}" for i in range(60)]
+        fetch_video_details(client, video_ids)
+
+        # Verify only first 50 were requested
+        call_args = client.videos().list.call_args
+        requested_ids = call_args[1]["id"].split(",")
+        assert len(requested_ids) == 50
+
+    def test_multiple_videos(self) -> None:
+        """Test fetching details for multiple videos."""
+        client = MagicMock()
+        client.videos().list().execute.return_value = {
+            "items": [
+                {
+                    "id": "vid1",
+                    "contentDetails": {"duration": "PT5M"},
+                    "snippet": {"liveBroadcastContent": "none"},
+                },
+                {
+                    "id": "vid2",
+                    "contentDetails": {"duration": "PT30S"},
+                    "snippet": {"liveBroadcastContent": "none"},
+                },
+            ]
+        }
+
+        result = fetch_video_details(client, ["vid1", "vid2"])
+        assert len(result) == 2
+        assert result["vid1"]["duration_seconds"] == 300
+        assert result["vid2"]["duration_seconds"] == 30
+
+    def test_missing_contentdetails(self) -> None:
+        """Test handling of missing contentDetails."""
+        client = MagicMock()
+        client.videos().list().execute.return_value = {
+            "items": [
+                {
+                    "id": "vid_no_details",
+                    "snippet": {"liveBroadcastContent": "none"},
+                }
+            ]
+        }
+
+        result = fetch_video_details(client, ["vid_no_details"])
+        # Should handle missing duration gracefully
+        assert "vid_no_details" in result
+        assert result["vid_no_details"]["duration_seconds"] == 0
+
+
+class TestFilterShortsAndStreams:
+    """Tests for filter_shorts_and_streams function."""
+
+    def test_empty_input_returns_empty(self) -> None:
+        """Test that empty input returns empty list."""
+        client = MagicMock()
+        result = filter_shorts_and_streams(client, [])
+        assert not result
+
+    def test_dry_run_returns_all_videos(self) -> None:
+        """Test that dry run mode returns all videos without filtering."""
+        client = MagicMock()
+        videos = [
+            {
+                "id": "vid1",
+                "title": "Video 1",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            }
+        ]
+
+        result = filter_shorts_and_streams(client, videos, dry_run=True)
+        assert result == videos
+        client.videos.assert_not_called()
+
+    def test_filters_out_shorts(self) -> None:
+        """Test that shorts (<=60s) are filtered out."""
+        client = MagicMock()
+        videos = [
+            {
+                "id": "short1",
+                "title": "Short Video",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            },
+            {
+                "id": "regular1",
+                "title": "Regular Video",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            },
+        ]
+
+        with patch("youtube_api.fetch_video_details") as mock_fetch:
+            mock_fetch.return_value = {
+                "short1": {"duration_seconds": 45, "is_live": False},
+                "regular1": {"duration_seconds": 300, "is_live": False},
+            }
+
+            result = filter_shorts_and_streams(client, videos, dry_run=False)
+
+        assert len(result) == 1
+        assert result[0]["id"] == "regular1"
+
+    def test_filters_out_streams(self) -> None:
+        """Test that live streams are filtered out."""
+        client = MagicMock()
+        videos = [
+            {
+                "id": "stream1",
+                "title": "Live Stream",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            },
+            {
+                "id": "regular1",
+                "title": "Regular Video",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            },
+        ]
+
+        with patch("youtube_api.fetch_video_details") as mock_fetch:
+            mock_fetch.return_value = {
+                "stream1": {"duration_seconds": 0, "is_live": True},
+                "regular1": {"duration_seconds": 300, "is_live": False},
+            }
+
+            result = filter_shorts_and_streams(client, videos, dry_run=False)
+
+        assert len(result) == 1
+        assert result[0]["id"] == "regular1"
+
+    def test_filters_both_shorts_and_streams(self) -> None:
+        """Test filtering both shorts and streams together."""
+        client = MagicMock()
+        videos = [
+            {
+                "id": "short1",
+                "title": "Short",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            },
+            {
+                "id": "stream1",
+                "title": "Stream",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            },
+            {
+                "id": "regular1",
+                "title": "Regular",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            },
+        ]
+
+        with patch("youtube_api.fetch_video_details") as mock_fetch:
+            mock_fetch.return_value = {
+                "short1": {"duration_seconds": 30, "is_live": False},
+                "stream1": {"duration_seconds": 0, "is_live": True},
+                "regular1": {"duration_seconds": 600, "is_live": False},
+            }
+
+            result = filter_shorts_and_streams(client, videos, dry_run=False)
+
+        assert len(result) == 1
+        assert result[0]["id"] == "regular1"
+
+    def test_fail_open_when_details_unavailable(self) -> None:
+        """Test fail-open behavior when video details cannot be fetched."""
+        client = MagicMock()
+        videos = [
+            {
+                "id": "vid_unknown",
+                "title": "Unknown Video",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            }
+        ]
+
+        with patch("youtube_api.fetch_video_details") as mock_fetch:
+            mock_fetch.return_value = {}  # No details available
+
+            result = filter_shorts_and_streams(client, videos, dry_run=False)
+
+        # Should include video when details are unavailable (fail open)
+        assert len(result) == 1
+        assert result[0]["id"] == "vid_unknown"
+
+    def test_boundary_case_60_seconds(self) -> None:
+        """Test boundary case: exactly 60 seconds (should be filtered as short)."""
+        client = MagicMock()
+        videos = [
+            {
+                "id": "boundary_vid",
+                "title": "60 Second Video",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            }
+        ]
+
+        with patch("youtube_api.fetch_video_details") as mock_fetch:
+            mock_fetch.return_value = {"boundary_vid": {"duration_seconds": 60, "is_live": False}}
+
+            result = filter_shorts_and_streams(client, videos, dry_run=False)
+
+        # 60 seconds should be filtered (<=60)
+        assert len(result) == 0
+
+    def test_boundary_case_61_seconds(self) -> None:
+        """Test boundary case: 61 seconds (should NOT be filtered)."""
+        client = MagicMock()
+        videos = [
+            {
+                "id": "regular_vid",
+                "title": "61 Second Video",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            }
+        ]
+
+        with patch("youtube_api.fetch_video_details") as mock_fetch:
+            mock_fetch.return_value = {"regular_vid": {"duration_seconds": 61, "is_live": False}}
+
+            result = filter_shorts_and_streams(client, videos, dry_run=False)
+
+        # 61 seconds should NOT be filtered (>60)
+        assert len(result) == 1
+
+    def test_all_videos_filtered(self) -> None:
+        """Test when all videos are filtered out."""
+        client = MagicMock()
+        videos = [
+            {
+                "id": "short1",
+                "title": "Short 1",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            },
+            {
+                "id": "short2",
+                "title": "Short 2",
+                "channel_id": "UC1",
+                "published_at": datetime(2024, 1, 1, tzinfo=UTC),
+            },
+        ]
+
+        with patch("youtube_api.fetch_video_details") as mock_fetch:
+            mock_fetch.return_value = {
+                "short1": {"duration_seconds": 30, "is_live": False},
+                "short2": {"duration_seconds": 45, "is_live": False},
+            }
+
+            result = filter_shorts_and_streams(client, videos, dry_run=False)
+
+        assert len(result) == 0

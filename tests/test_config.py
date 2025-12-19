@@ -161,7 +161,7 @@ class TestLoadConfig:
         assert config.channel_ids == ("UCchannel1",)
         assert config.target_dir == target_dir
 
-    def test_missing_target_directory_raises(self, tmp_path: Path) -> None:
+    def test_missing_target_directory_raises(self) -> None:
         """Test that missing TARGET_DIRECTORY raises ConfigError."""
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("TARGET_DIRECTORY", None)

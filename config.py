@@ -218,8 +218,7 @@ def _get_api_key(base_dir: Path) -> str:
                 stacklevel=2,
             )
             logger.warning(
-                "DEPRECATION: Using legacy API_key file. "
-                "Please migrate to YOUTUBE_API_KEY environment variable."
+                "DEPRECATION: Using legacy API_key file. Please migrate to YOUTUBE_API_KEY environment variable."
             )
             return api_key
 

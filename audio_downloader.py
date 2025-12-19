@@ -81,11 +81,11 @@ def run(config: Config) -> int:
     # 1. Load download history
     history = load_history(config.history_file)
     downloaded_ids = history.get_downloaded_ids()
-    logger.info(f"Loaded history with {len(downloaded_ids)} previously downloaded videos")
+    logger.info("Loaded history with %s previously downloaded videos", len(downloaded_ids))
 
     # 2. Calculate lookback window
     since_date = datetime.now(UTC) - timedelta(days=config.lookback_days)
-    logger.info(f"Checking for videos published since {since_date.date()}")
+    logger.info("Checking for videos published since %s", since_date.date())
 
     # 3. Create YouTube client and fetch videos from all channels
     client = create_youtube_client(config.api_key)
@@ -111,7 +111,7 @@ def run(config: Config) -> int:
         logger.info("All videos already downloaded, nothing to do")
         return 0
 
-    logger.info(f"Found {len(new_videos)} new video(s) to download")
+    logger.info("Found %s new video(s) to download", len(new_videos))
 
     # 6. Download each video
     download_results = download_videos(new_videos, config.download_dir)
@@ -182,22 +182,25 @@ def log_summary(
     logger.info("Run Summary")
     logger.info("=" * 50)
     logger.info(
-        f"Downloads: {download_results.success_count} successful, "
-        f"{download_results.failure_count} failed"
+        "Downloads: %s successful, %s failed",
+        download_results.success_count,
+        download_results.failure_count,
     )
     logger.info(
-        f"Files moved: {move_results.success_count} successful, {move_results.failure_count} failed"
+        "Files moved: %s successful, %s failed",
+        move_results.success_count,
+        move_results.failure_count,
     )
 
     if download_results.failed:
         logger.warning("Failed downloads:")
         for failure in download_results.failed:
-            logger.warning(f"  - {failure.title}: {failure.error}")
+            logger.warning("  - %s: %s", failure.title, failure.error)
 
     if move_results.failed:
         logger.warning("Failed moves:")
         for failure in move_results.failed:
-            logger.warning(f"  - {failure.source.name}: {failure.error}")
+            logger.warning("  - %s: %s", failure.source.name, failure.error)
 
     logger.info("=" * 50)
 
@@ -250,8 +253,8 @@ def main() -> int:
 
         try:
             return run(config)
-        except Exception as e:
-            logger.exception(f"Unexpected error: {e}")
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.exception("Unexpected error: %s", e)
             return 1
         finally:
             logger.info("Done")

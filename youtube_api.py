@@ -76,10 +76,10 @@ def _validate_max_results(max_results: int) -> int:
         Validated max_results within API limits (1-50).
     """
     if max_results < MIN_RESULTS_LIMIT:
-        logger.warning(f"max_results {max_results} is below minimum, using {MIN_RESULTS_LIMIT}")
+        logger.warning("max_results %s is below minimum, using %s", max_results, MIN_RESULTS_LIMIT)
         return MIN_RESULTS_LIMIT
     if max_results > MAX_RESULTS_LIMIT:
-        logger.warning(f"max_results {max_results} exceeds API limit, using {MAX_RESULTS_LIMIT}")
+        logger.warning("max_results %s exceeds API limit, using %s", max_results, MAX_RESULTS_LIMIT)
         return MAX_RESULTS_LIMIT
     return max_results
 
@@ -116,7 +116,7 @@ def _get_uploads_playlist_id(client, channel_id: str) -> str | None:
         return None
 
     except googleapiclient.errors.HttpError as e:
-        logger.error(f"YouTube API error getting uploads playlist for {channel_id}: {e}")
+        logger.error("YouTube API error getting uploads playlist for %s: %s", channel_id, e)
         return None
 
 
@@ -149,14 +149,14 @@ def fetch_channel_videos(
     if dry_run:
         mock_count = int(os.getenv("DRY_RUN_MOCK_VIDEO_COUNT", "2"))
         mock_videos = _create_mock_videos(channel_id, since, count=mock_count)
-        logger.info(f"[DRY RUN] Channel {channel_id}: returning {len(mock_videos)} mock videos")
+        logger.info("[DRY RUN] Channel %s: returning %s mock videos", channel_id, len(mock_videos))
         return mock_videos
 
     try:
         # Get uploads playlist ID (usually derived, no API call needed)
         playlist_id = _get_uploads_playlist_id(client, channel_id)
         if not playlist_id:
-            logger.warning(f"Could not find uploads playlist for channel {channel_id}")
+            logger.warning("Could not find uploads playlist for channel %s", channel_id)
             return []
 
         # Fetch videos from uploads playlist (1 quota unit)
@@ -168,14 +168,17 @@ def fetch_channel_videos(
         response = request.execute()
 
         videos = _parse_playlist_response(response, channel_id, since)
-        logger.debug(f"Channel {channel_id}: found {len(videos)} videos since {since}")
+        logger.debug("Channel %s: found %s videos since %s", channel_id, len(videos), since)
         return videos
 
     except googleapiclient.errors.HttpError as e:
-        logger.error(f"YouTube API error for channel {channel_id}: {e}")
+        logger.error("YouTube API error for channel %s: %s", channel_id, e)
+        return []
+    except (KeyError, ValueError, TypeError) as e:
+        logger.error("Error parsing response for channel %s: %s", channel_id, e)
         return []
     except Exception as e:
-        logger.error(f"Error fetching videos for channel {channel_id}: {e}")
+        logger.error("Unexpected error fetching videos for channel %s: %s", channel_id, e)
         return []
 
 
@@ -207,7 +210,7 @@ def fetch_all_channels_videos(
     for i, channel_id in enumerate(channel_ids):
         # Rate limiting: add delay between channel requests (skip first)
         if i > 0 and not dry_run and api_delay > 0:
-            logger.debug(f"Rate limiting: waiting {api_delay}s before next API call")
+            logger.debug("Rate limiting: waiting %ss before next API call", api_delay)
             time.sleep(api_delay)
 
         videos = fetch_channel_videos(client, channel_id, since, dry_run=dry_run)
@@ -216,7 +219,7 @@ def fetch_all_channels_videos(
     # Sort by publish date, newest first
     all_videos.sort(key=lambda v: v["published_at"], reverse=True)
 
-    logger.info(f"Found {len(all_videos)} total videos from {len(channel_ids)} channels")
+    logger.info("Found %s total videos from %s channels", len(all_videos), len(channel_ids))
     return all_videos
 
 
@@ -246,7 +249,7 @@ def _parse_playlist_response(response: dict, channel_id: str, since: datetime) -
                 "videoPublishedAt", snippet.get("publishedAt")
             )
             if not published_str:
-                logger.warning(f"No publish date for video {video_id}, skipping")
+                logger.warning("No publish date for video %s, skipping", video_id)
                 continue
 
             published_at = dateutil.parser.isoparse(published_str)
@@ -264,7 +267,7 @@ def _parse_playlist_response(response: dict, channel_id: str, since: datetime) -
                 }
             )
         except (KeyError, ValueError) as e:
-            logger.warning(f"Failed to parse video from response: {e}")
+            logger.warning("Failed to parse video from response: %s", e)
             continue
 
     return videos
@@ -303,24 +306,35 @@ def _create_mock_videos(channel_id: str, since: datetime, count: int = 2) -> lis
 def _parse_iso8601_duration(duration: str) -> int:
     """Parse ISO 8601 duration string to seconds.
 
+    Handles standard YouTube video durations (hours, minutes, seconds).
+    Note: Days component (e.g., P1DT2H) is not commonly used by YouTube,
+    but will be parsed correctly if encountered.
+
     Args:
-        duration: ISO 8601 duration string (e.g., "PT1H30M15S", "PT45S").
+        duration: ISO 8601 duration string (e.g., "PT1H30M15S", "PT45S", "PT0S").
 
     Returns:
-        Duration in seconds.
+        Duration in seconds. Returns 0 for malformed or empty durations.
     """
-    # Match hours, minutes, and seconds from ISO 8601 duration
-    pattern = r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?"
+    # Full ISO 8601 pattern including days: P[n]DT[n]H[n]M[n]S
+    # Days component is optional and not common in YouTube durations
+    pattern = r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?"
     match = re.match(pattern, duration)
 
     if not match:
+        logger.warning("Failed to parse ISO 8601 duration: %s", duration)
         return 0
 
-    hours = int(match.group(1) or 0)
-    minutes = int(match.group(2) or 0)
-    seconds = int(match.group(3) or 0)
+    days = int(match.group(1) or 0)
+    hours = int(match.group(2) or 0)
+    minutes = int(match.group(3) or 0)
+    seconds = int(match.group(4) or 0)
 
-    return hours * 3600 + minutes * 60 + seconds
+    # Log if days component is present (unusual for YouTube)
+    if days > 0:
+        logger.warning("ISO 8601 duration with days component detected: %s", duration)
+
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
 def fetch_video_details(
@@ -330,6 +344,11 @@ def fetch_video_details(
     """Fetch video details to check for shorts and streams.
 
     Uses videos.list API (1 quota unit per batch of up to 50 videos).
+
+    Note: Only processes the first 50 videos due to API batch size limits.
+    If more than 50 videos are provided, only the first batch will be
+    processed. This is typically acceptable given the existing API design
+    and lookback window constraints.
 
     Args:
         client: YouTube API client.
@@ -346,7 +365,7 @@ def fetch_video_details(
     try:
         # YouTube API allows up to 50 IDs per request
         request = client.videos().list(
-            part="contentDetails,liveStreamingDetails",
+            part="contentDetails,liveStreamingDetails,snippet",
             id=",".join(video_ids[:MAX_RESULTS_LIMIT]),
         )
         response = request.execute()
@@ -357,7 +376,10 @@ def fetch_video_details(
             duration_str = content_details.get("duration", "PT0S")
             duration_seconds = _parse_iso8601_duration(duration_str)
 
-            # Check if it's a live stream (has liveStreamingDetails or is currently live)
+            # Check if it's a live stream or was a live stream (VOD)
+            # - liveStreamingDetails: present for any video that was/is a live stream
+            # - liveBroadcastContent: "live", "upcoming", or "none" (for completed streams)
+            # Current behavior: filters out ALL live content including completed stream VODs
             has_live_details = "liveStreamingDetails" in item
             live_content = item.get("snippet", {}).get("liveBroadcastContent", "none")
             is_live = has_live_details or live_content in ("live", "upcoming")
@@ -368,9 +390,11 @@ def fetch_video_details(
             }
 
     except googleapiclient.errors.HttpError as e:
-        logger.error(f"YouTube API error fetching video details: {e}")
+        logger.error("YouTube API error fetching video details: %s", e)
+    except (KeyError, ValueError, TypeError) as e:
+        logger.error("Error parsing video details: %s", e)
     except Exception as e:
-        logger.error(f"Error fetching video details: {e}")
+        logger.error("Unexpected error fetching video details: %s", e)
 
     return details
 
@@ -381,6 +405,13 @@ def filter_shorts_and_streams(
     dry_run: bool = False,
 ) -> list[VideoInfo]:
     """Filter out YouTube Shorts and live streams from video list.
+
+    Filters out:
+    - Shorts: videos with duration <= 60 seconds
+    - Live streams: active, upcoming, and completed live stream VODs
+
+    Uses fail-open approach: if video details cannot be fetched, the video
+    is included in the results rather than filtered out.
 
     Args:
         client: YouTube API client.
@@ -417,22 +448,18 @@ def filter_shorts_and_streams(
         is_live = video_details["is_live"]
 
         if is_live:
-            logger.debug(f"Skipping stream: {video['title']} ({video_id})")
+            logger.debug("Skipping stream: %s (%s)", video["title"], video_id)
             skipped_streams += 1
             continue
 
         if duration <= SHORTS_MAX_DURATION_SECONDS:
-            logger.debug(
-                f"Skipping short ({duration}s): {video['title']} ({video_id})"
-            )
+            logger.debug("Skipping short (%ss): %s (%s)", duration, video["title"], video_id)
             skipped_shorts += 1
             continue
 
         filtered_videos.append(video)
 
     if skipped_shorts > 0 or skipped_streams > 0:
-        logger.info(
-            f"Filtered out {skipped_shorts} short(s) and {skipped_streams} stream(s)"
-        )
+        logger.info("Filtered out %s short(s) and %s stream(s)", skipped_shorts, skipped_streams)
 
     return filtered_videos
