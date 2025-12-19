@@ -1,15 +1,14 @@
-# -*- coding: utf-8 -*-
 """Configuration module for YouTube audio downloader.
 
 Loads all configuration from environment variables and files in one place at startup.
 """
 
+import contextlib
 import logging
 import os
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -43,7 +42,7 @@ class Config:
     history_max_age_days: int
     audio_extensions: frozenset[str]
     log_level: str
-    log_file: Optional[Path]
+    log_file: Path | None
     dry_run: bool = False  # If True, use mock data instead of calling YouTube API
 
 
@@ -64,18 +63,14 @@ def _validate_path_safety(path: Path, name: str, base_dir: Path | None = None) -
     # Check for suspicious patterns
     path_str = str(path)
     if ".." in path_str:
-        raise ConfigError(
-            f"{name} contains path traversal pattern '..': {path}"
-        )
+        raise ConfigError(f"{name} contains path traversal pattern '..': {path}")
 
     # If base_dir is provided, ensure path is within it
     if base_dir is not None:
         base_resolved = base_dir.resolve()
-        try:
+        # Path is not relative to base - that's OK for some paths
+        with contextlib.suppress(ValueError):
             resolved.relative_to(base_resolved)
-        except ValueError:
-            # Path is not relative to base - that's OK for some paths
-            pass
 
 
 def _parse_audio_extensions(extensions_str: str) -> frozenset[str]:
@@ -98,7 +93,7 @@ def _parse_audio_extensions(extensions_str: str) -> frozenset[str]:
     return frozenset(extensions)
 
 
-def load_config(env_file: Optional[Path] = None, dry_run: bool = False) -> Config:
+def load_config(env_file: Path | None = None, dry_run: bool = False) -> Config:
     """Load all configuration from environment and files.
 
     Args:
@@ -128,8 +123,7 @@ def load_config(env_file: Optional[Path] = None, dry_run: bool = False) -> Confi
     target_dir_str = os.getenv("TARGET_DIRECTORY")
     if not target_dir_str:
         raise ConfigError(
-            "TARGET_DIRECTORY environment variable is required. "
-            "Set it in .env file or environment."
+            "TARGET_DIRECTORY environment variable is required. Set it in .env file or environment."
         )
     target_dir = Path(target_dir_str).expanduser()
     _validate_path_safety(target_dir, "TARGET_DIRECTORY")
@@ -151,19 +145,15 @@ def load_config(env_file: Optional[Path] = None, dry_run: bool = False) -> Confi
     except ValueError:
         raise ConfigError(
             f"LOOKBACK_DAYS must be a positive integer, got: {lookback_days_str}"
-        )
+        ) from None
 
     # Optional: History file path (default: ./download_history.json)
-    history_file_str = os.getenv(
-        "HISTORY_FILE", str(base_dir / "download_history.json")
-    )
+    history_file_str = os.getenv("HISTORY_FILE", str(base_dir / "download_history.json"))
     history_file = Path(history_file_str).expanduser()
     _validate_path_safety(history_file, "HISTORY_FILE")
 
     # Optional: History max age in days (default: 90)
-    history_max_age_str = os.getenv(
-        "HISTORY_MAX_AGE_DAYS", str(DEFAULT_HISTORY_MAX_AGE_DAYS)
-    )
+    history_max_age_str = os.getenv("HISTORY_MAX_AGE_DAYS", str(DEFAULT_HISTORY_MAX_AGE_DAYS))
     try:
         history_max_age_days = int(history_max_age_str)
         if history_max_age_days < 1:
@@ -171,7 +161,7 @@ def load_config(env_file: Optional[Path] = None, dry_run: bool = False) -> Confi
     except ValueError:
         raise ConfigError(
             f"HISTORY_MAX_AGE_DAYS must be a positive integer, got: {history_max_age_str}"
-        )
+        ) from None
 
     # Optional: Audio extensions (default: common audio formats including flac)
     audio_extensions_str = os.getenv("AUDIO_EXTENSIONS", DEFAULT_AUDIO_EXTENSIONS)

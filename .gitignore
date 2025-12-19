@@ -21,6 +21,12 @@ last_download_time
 last_download_date
 last_downloaded
 
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
 # Python
 __pycache__/
 *.py[cod]
