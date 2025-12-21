@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yt_dlp
 
+from chapters import process_chapters
 from thumbnail import process_thumbnail
 from youtube_api import VideoInfo
 
@@ -66,7 +67,7 @@ def _download_with_retry(
     title: str,
     max_retries: int,
     initial_backoff: float,
-) -> tuple[bool, str | None, int, Path | None]:
+) -> tuple[bool, str | None, int, Path | None, dict | None]:
     """Attempt to download with exponential backoff retry.
 
     Args:
@@ -77,29 +78,28 @@ def _download_with_retry(
         initial_backoff: Initial backoff delay in seconds.
 
     Returns:
-        Tuple of (success, error_message, retry_count, file_path).
+        Tuple of (success, error_message, retry_count, file_path, info_dict).
     """
     last_error: str | None = None
     retry_count = 0
     file_path: Path | None = None
+    info_dict: dict | None = None
 
     for attempt in range(max_retries + 1):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=True)
                 if info:
-                    # Get the actual output filename
+                    info_dict = dict(info)
                     filename = ydl.prepare_filename(info)
-                    # Handle format conversion (yt-dlp may change extension)
                     file_path = Path(filename)
-                    # Check common audio extensions if base file doesn't exist
                     if not file_path.exists():
                         for ext in [".m4a", ".mp3", ".opus", ".ogg", ".webm"]:
                             candidate = file_path.with_suffix(ext)
                             if candidate.exists():
                                 file_path = candidate
                                 break
-            return True, None, retry_count, file_path
+            return True, None, retry_count, file_path, info_dict
 
         except yt_dlp.utils.DownloadError as e:
             last_error = str(e)
@@ -136,7 +136,7 @@ def _download_with_retry(
             logger.error("Unexpected error downloading %s: %s", title, last_error)
             break
 
-    return False, last_error, retry_count, None
+    return False, last_error, retry_count, None, None
 
 
 def _is_permanent_error(error_msg: str) -> bool:
@@ -200,7 +200,7 @@ def download_audio(
         "no_warnings": True,
     }
 
-    success, error, retry_count, file_path = _download_with_retry(
+    success, error, retry_count, file_path, info_dict = _download_with_retry(
         video_url, ydl_opts, title or video_id, max_retries, initial_backoff
     )
 
@@ -210,9 +210,10 @@ def download_audio(
         else:
             logger.info("Downloaded: %s", title or video_id)
 
-        # Embed thumbnail into the audio file
         if file_path and file_path.exists():
             process_thumbnail(video_id, file_path)
+            if info_dict:
+                process_chapters(info_dict, file_path)
 
     return DownloadResult(
         video_id=video_id,
