@@ -4,7 +4,6 @@ import io
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from PIL import Image
 
 from thumbnail import (

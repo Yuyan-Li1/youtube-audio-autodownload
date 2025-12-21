@@ -4,17 +4,18 @@ Downloads YouTube video thumbnails, pads them to square, and embeds them
 into audio files (M4A, MP3, OGG/OPUS) for podcast player compatibility.
 """
 
+import base64
 import io
 import logging
 from pathlib import Path
 
 import requests
+from mutagen.flac import Picture
+from mutagen.id3 import APIC
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
-from mutagen.flac import Picture
-from mutagen.id3 import ID3, APIC
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -182,10 +183,7 @@ def embed_thumbnail_ogg(audio_path: Path, image_data: bytes) -> bool:
     try:
         # Try OggOpus first, then OggVorbis
         suffix = audio_path.suffix.lower()
-        if suffix == ".opus":
-            audio = OggOpus(audio_path)
-        else:
-            audio = OggVorbis(audio_path)
+        audio = OggOpus(audio_path) if suffix == ".opus" else OggVorbis(audio_path)
 
         # Create FLAC picture block
         picture = Picture()
@@ -200,7 +198,6 @@ def embed_thumbnail_ogg(audio_path: Path, image_data: bytes) -> bool:
             picture.depth = 24  # 8 bits per channel * 3 channels
 
         # Encode picture and add to file
-        import base64
 
         picture_data = base64.b64encode(picture.write()).decode("ascii")
         audio["metadata_block_picture"] = [picture_data]
@@ -255,9 +252,7 @@ def process_thumbnail(video_id: str, audio_path: Path) -> bool:
     """
     # Check if format is supported
     if audio_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-        logger.debug(
-            "Skipping thumbnail for unsupported format: %s", audio_path.suffix
-        )
+        logger.debug("Skipping thumbnail for unsupported format: %s", audio_path.suffix)
         return False
 
     # Download thumbnail
