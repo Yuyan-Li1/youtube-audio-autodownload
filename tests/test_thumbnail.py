@@ -4,6 +4,7 @@ import io
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import requests
 from PIL import Image
 
 from thumbnail import (
@@ -32,7 +33,6 @@ class TestDownloadThumbnail:
             result = download_thumbnail("test_video_id")
 
         assert result == b"x" * 2000
-        # Should have called with the first (highest res) URL
         expected_url = THUMBNAIL_URLS[0].format(video_id="test_video_id")
         mock_get.assert_called_once_with(expected_url, timeout=30)
 
@@ -73,7 +73,6 @@ class TestDownloadThumbnail:
 
     def test_handles_request_exception(self) -> None:
         """Test handling of request exceptions."""
-        import requests
 
         with patch("requests.get", side_effect=requests.RequestException("Network error")):
             result = download_thumbnail("test_video_id")
@@ -93,7 +92,6 @@ class TestPadToSquare:
 
     def test_pads_landscape_image(self) -> None:
         """Test padding of a landscape (wide) image."""
-        # 200x100 image should become 200x200
         image_data = self._create_test_image(200, 100)
         result = pad_to_square(image_data)
 
@@ -102,7 +100,6 @@ class TestPadToSquare:
 
     def test_pads_portrait_image(self) -> None:
         """Test padding of a portrait (tall) image."""
-        # 100x200 image should become 200x200
         image_data = self._create_test_image(100, 200)
         result = pad_to_square(image_data)
 
@@ -111,7 +108,6 @@ class TestPadToSquare:
 
     def test_square_image_unchanged_size(self) -> None:
         """Test that square image dimensions are preserved."""
-        # 200x200 image should stay 200x200
         image_data = self._create_test_image(200, 200)
         result = pad_to_square(image_data)
 
@@ -128,7 +124,6 @@ class TestPadToSquare:
 
     def test_handles_png_with_alpha(self) -> None:
         """Test handling of PNG with alpha channel."""
-        # Create RGBA image
         img = Image.new("RGBA", (200, 100), color=(255, 0, 0, 128))
         output = io.BytesIO()
         img.save(output, format="PNG")
@@ -138,7 +133,7 @@ class TestPadToSquare:
 
         with Image.open(io.BytesIO(result)) as img:
             assert img.size == (200, 200)
-            assert img.mode == "RGB"  # Should be converted from RGBA
+            assert img.mode == "RGB"
 
 
 class TestEmbedThumbnail:
@@ -250,7 +245,6 @@ class TestEmbedThumbnailMP3:
 
         mock_tags = MagicMock()
         mock_audio = MagicMock()
-        # After add_tags is called, tags should be accessible
         mock_audio.tags = None
 
         def set_tags():
@@ -353,10 +347,9 @@ class TestProcessThumbnail:
 
         assert result is True
         mock_embed.assert_called_once()
-        # Check that the image was padded to square
         embedded_data = mock_embed.call_args[0][1]
         with Image.open(io.BytesIO(embedded_data)) as img:
-            assert img.size[0] == img.size[1]  # Should be square
+            assert img.size[0] == img.size[1]
 
     def test_skips_unsupported_format(self, tmp_path: Path) -> None:
         """Test that unsupported formats are skipped early."""

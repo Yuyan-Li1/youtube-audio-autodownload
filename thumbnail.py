@@ -80,28 +80,23 @@ def pad_to_square(image_data: bytes) -> bytes:
         Padded image as JPEG bytes.
     """
     with Image.open(io.BytesIO(image_data)) as img:
-        # Convert to RGB if necessary (for PNG with alpha)
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
 
         width, height = img.size
 
-        # Already square
         if width == height:
             output = io.BytesIO()
             img.save(output, format="JPEG", quality=95)
             return output.getvalue()
 
-        # Create square canvas with black background
         size = max(width, height)
         square_img = Image.new("RGB", (size, size), (0, 0, 0))
 
-        # Center the original image
         x_offset = (size - width) // 2
         y_offset = (size - height) // 2
         square_img.paste(img, (x_offset, y_offset))
 
-        # Save as JPEG
         output = io.BytesIO()
         square_img.save(output, format="JPEG", quality=95)
         return output.getvalue()
@@ -120,14 +115,14 @@ def embed_thumbnail_mp3(audio_path: Path, image_data: bytes) -> bool:
     try:
         audio = MP3(audio_path)
 
-        # Ensure ID3 tags exist
         if audio.tags is None:
             audio.add_tags()
 
-        # Remove existing artwork
+        # mypy doesn't understand that add_tags() ensures tags is not None
+        assert audio.tags is not None
+
         audio.tags.delall("APIC")
 
-        # Add new artwork
         audio.tags.add(
             APIC(
                 encoding=3,  # UTF-8
@@ -159,7 +154,9 @@ def embed_thumbnail_m4a(audio_path: Path, image_data: bytes) -> bool:
     try:
         audio = MP4(audio_path)
 
-        # Add cover artwork
+        # Ensure tags exist (MP4 creates them automatically, but mypy needs to know)
+        assert audio.tags is not None
+
         audio.tags["covr"] = [MP4Cover(image_data, imageformat=MP4Cover.FORMAT_JPEG)]
 
         audio.save()
@@ -181,23 +178,18 @@ def embed_thumbnail_ogg(audio_path: Path, image_data: bytes) -> bool:
         True if successful, False otherwise.
     """
     try:
-        # Try OggOpus first, then OggVorbis
         suffix = audio_path.suffix.lower()
         audio = OggOpus(audio_path) if suffix == ".opus" else OggVorbis(audio_path)
 
-        # Create FLAC picture block
         picture = Picture()
         picture.type = 3  # Cover (front)
         picture.mime = "image/jpeg"
         picture.desc = "Cover"
         picture.data = image_data
 
-        # Get image dimensions for the picture block
         with Image.open(io.BytesIO(image_data)) as img:
             picture.width, picture.height = img.size
             picture.depth = 24  # 8 bits per channel * 3 channels
-
-        # Encode picture and add to file
 
         picture_data = base64.b64encode(picture.write()).decode("ascii")
         audio["metadata_block_picture"] = [picture_data]
@@ -250,24 +242,20 @@ def process_thumbnail(video_id: str, audio_path: Path) -> bool:
     Returns:
         True if thumbnail was successfully embedded, False otherwise.
     """
-    # Check if format is supported
     if audio_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
         logger.debug("Skipping thumbnail for unsupported format: %s", audio_path.suffix)
         return False
 
-    # Download thumbnail
     thumbnail_data = download_thumbnail(video_id)
     if thumbnail_data is None:
         return False
 
-    # Pad to square
     try:
         squared_data = pad_to_square(thumbnail_data)
     except Exception as e:
         logger.error("Failed to pad thumbnail for video %s: %s", video_id, e)
         return False
 
-    # Embed in audio file
     success = embed_thumbnail(audio_path, squared_data)
     if success:
         logger.info("Embedded thumbnail in %s", audio_path.name)
