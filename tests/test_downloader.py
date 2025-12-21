@@ -63,9 +63,11 @@ class TestDownloadWithRetry:
         """Test successful download on first attempt."""
         with patch("yt_dlp.YoutubeDL") as mock_ydl:
             mock_instance = MagicMock()
+            mock_instance.extract_info.return_value = {"title": "Test"}
+            mock_instance.prepare_filename.return_value = str(tmp_path / "test.m4a")
             mock_ydl.return_value.__enter__.return_value = mock_instance
 
-            success, error, retry_count = _download_with_retry(
+            success, error, retry_count, file_path = _download_with_retry(
                 "https://youtube.com/watch?v=test",
                 {"paths": {"home": str(tmp_path)}},
                 "Test Video",
@@ -81,15 +83,16 @@ class TestDownloadWithRetry:
         """Test retry behavior on temporary errors."""
         with patch("yt_dlp.YoutubeDL") as mock_ydl:
             mock_instance = MagicMock()
-            mock_instance.download.side_effect = [
+            mock_instance.extract_info.side_effect = [
                 yt_dlp.utils.DownloadError("Network error"),
                 yt_dlp.utils.DownloadError("Network error"),
-                None,  # Success on third attempt
+                {"title": "Test"},  # Success on third attempt
             ]
+            mock_instance.prepare_filename.return_value = str(tmp_path / "test.m4a")
             mock_ydl.return_value.__enter__.return_value = mock_instance
 
             with patch("time.sleep"):  # Skip actual sleep
-                success, error, retry_count = _download_with_retry(
+                success, error, retry_count, file_path = _download_with_retry(
                     "https://youtube.com/watch?v=test",
                     {"paths": {"home": str(tmp_path)}},
                     "Test Video",
@@ -105,11 +108,11 @@ class TestDownloadWithRetry:
         """Test that permanent errors don't trigger retry."""
         with patch("yt_dlp.YoutubeDL") as mock_ydl:
             mock_instance = MagicMock()
-            mock_instance.download.side_effect = yt_dlp.utils.DownloadError("Video unavailable")
+            mock_instance.extract_info.side_effect = yt_dlp.utils.DownloadError("Video unavailable")
             mock_ydl.return_value.__enter__.return_value = mock_instance
 
             with patch("time.sleep") as mock_sleep:
-                success, error, retry_count = _download_with_retry(
+                success, error, retry_count, file_path = _download_with_retry(
                     "https://youtube.com/watch?v=test",
                     {"paths": {"home": str(tmp_path)}},
                     "Test Video",
@@ -120,17 +123,18 @@ class TestDownloadWithRetry:
         assert success is False
         assert "Video unavailable" in error
         assert retry_count == 0
+        assert file_path is None
         mock_sleep.assert_not_called()
 
     def test_max_retries_exceeded(self, tmp_path: Path) -> None:
         """Test failure after max retries exceeded."""
         with patch("yt_dlp.YoutubeDL") as mock_ydl:
             mock_instance = MagicMock()
-            mock_instance.download.side_effect = yt_dlp.utils.DownloadError("Network error")
+            mock_instance.extract_info.side_effect = yt_dlp.utils.DownloadError("Network error")
             mock_ydl.return_value.__enter__.return_value = mock_instance
 
             with patch("time.sleep"):
-                success, error, retry_count = _download_with_retry(
+                success, error, retry_count, file_path = _download_with_retry(
                     "https://youtube.com/watch?v=test",
                     {"paths": {"home": str(tmp_path)}},
                     "Test Video",
@@ -141,15 +145,16 @@ class TestDownloadWithRetry:
         assert success is False
         assert "Network error" in error
         assert retry_count == 2
+        assert file_path is None
 
     def test_handles_unexpected_exception(self, tmp_path: Path) -> None:
         """Test handling of unexpected exceptions."""
         with patch("yt_dlp.YoutubeDL") as mock_ydl:
             mock_instance = MagicMock()
-            mock_instance.download.side_effect = RuntimeError("Unexpected error")
+            mock_instance.extract_info.side_effect = RuntimeError("Unexpected error")
             mock_ydl.return_value.__enter__.return_value = mock_instance
 
-            success, error, retry_count = _download_with_retry(
+            success, error, retry_count, file_path = _download_with_retry(
                 "https://youtube.com/watch?v=test",
                 {"paths": {"home": str(tmp_path)}},
                 "Test Video",
@@ -160,6 +165,7 @@ class TestDownloadWithRetry:
         assert success is False
         assert "Unexpected error" in error
         assert retry_count == 0
+        assert file_path is None
 
 
 class TestDownloadAudio:
@@ -167,8 +173,14 @@ class TestDownloadAudio:
 
     def test_successful_download(self, tmp_path: Path) -> None:
         """Test successful audio download."""
-        with patch("downloader._download_with_retry") as mock_retry:
-            mock_retry.return_value = (True, None, 0)
+        test_file = tmp_path / "test.m4a"
+        test_file.touch()
+
+        with (
+            patch("downloader._download_with_retry") as mock_retry,
+            patch("downloader.process_thumbnail") as mock_thumb,
+        ):
+            mock_retry.return_value = (True, None, 0, test_file)
 
             result = download_audio(
                 "test_video_id",
@@ -183,11 +195,13 @@ class TestDownloadAudio:
         assert result.video_id == "test_video_id"
         assert result.title == "Test Video"
         assert result.error is None
+        assert result.file_path == test_file
+        mock_thumb.assert_called_once_with("test_video_id", test_file)
 
     def test_failed_download(self, tmp_path: Path) -> None:
         """Test failed audio download."""
         with patch("downloader._download_with_retry") as mock_retry:
-            mock_retry.return_value = (False, "Download failed", 2)
+            mock_retry.return_value = (False, "Download failed", 2, None)
 
             result = download_audio(
                 "test_video_id",
@@ -201,6 +215,7 @@ class TestDownloadAudio:
         assert result.success is False
         assert result.error == "Download failed"
         assert result.retry_count == 2
+        assert result.file_path is None
 
     def test_uses_env_defaults(self, tmp_path: Path) -> None:
         """Test that environment defaults are used."""
@@ -210,8 +225,9 @@ class TestDownloadAudio:
                 {"DOWNLOAD_MAX_RETRIES": "5", "DOWNLOAD_INITIAL_BACKOFF": "1.0"},
             ),
             patch("downloader._download_with_retry") as mock_retry,
+            patch("downloader.process_thumbnail"),
         ):
-            mock_retry.return_value = (True, None, 0)
+            mock_retry.return_value = (True, None, 0, None)
 
             download_audio("test_id", tmp_path)
 
