@@ -68,11 +68,13 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = [
     "audio_downloader",
+    "chapters",
     "config",
     "downloader",
     "file_ops",
     "history",
     "lock",
+    "thumbnail",
     "youtube_api",
 ]
 

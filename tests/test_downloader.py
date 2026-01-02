@@ -67,7 +67,7 @@ class TestDownloadWithRetry:
             mock_instance.prepare_filename.return_value = str(tmp_path / "test.m4a")
             mock_ydl.return_value.__enter__.return_value = mock_instance
 
-            success, error, retry_count, file_path = _download_with_retry(
+            success, error, retry_count, file_path, info_dict = _download_with_retry(
                 "https://youtube.com/watch?v=test",
                 {"paths": {"home": str(tmp_path)}},
                 "Test Video",
@@ -78,6 +78,7 @@ class TestDownloadWithRetry:
         assert success is True
         assert error is None
         assert retry_count == 0
+        assert info_dict == {"title": "Test"}
 
     def test_retry_on_temporary_error(self, tmp_path: Path) -> None:
         """Test retry behavior on temporary errors."""
@@ -92,7 +93,7 @@ class TestDownloadWithRetry:
             mock_ydl.return_value.__enter__.return_value = mock_instance
 
             with patch("time.sleep"):  # Skip actual sleep
-                success, error, retry_count, file_path = _download_with_retry(
+                success, error, retry_count, file_path, info_dict = _download_with_retry(
                     "https://youtube.com/watch?v=test",
                     {"paths": {"home": str(tmp_path)}},
                     "Test Video",
@@ -103,6 +104,7 @@ class TestDownloadWithRetry:
         assert success is True
         assert error is None
         assert retry_count == 1
+        assert info_dict == {"title": "Test"}
 
     def test_no_retry_on_permanent_error(self, tmp_path: Path) -> None:
         """Test that permanent errors don't trigger retry."""
@@ -112,7 +114,7 @@ class TestDownloadWithRetry:
             mock_ydl.return_value.__enter__.return_value = mock_instance
 
             with patch("time.sleep") as mock_sleep:
-                success, error, retry_count, file_path = _download_with_retry(
+                success, error, retry_count, file_path, info_dict = _download_with_retry(
                     "https://youtube.com/watch?v=test",
                     {"paths": {"home": str(tmp_path)}},
                     "Test Video",
@@ -121,9 +123,11 @@ class TestDownloadWithRetry:
                 )
 
         assert success is False
+        assert error is not None
         assert "Video unavailable" in error
         assert retry_count == 0
         assert file_path is None
+        assert info_dict is None
         mock_sleep.assert_not_called()
 
     def test_max_retries_exceeded(self, tmp_path: Path) -> None:
@@ -134,7 +138,7 @@ class TestDownloadWithRetry:
             mock_ydl.return_value.__enter__.return_value = mock_instance
 
             with patch("time.sleep"):
-                success, error, retry_count, file_path = _download_with_retry(
+                success, error, retry_count, file_path, info_dict = _download_with_retry(
                     "https://youtube.com/watch?v=test",
                     {"paths": {"home": str(tmp_path)}},
                     "Test Video",
@@ -143,9 +147,11 @@ class TestDownloadWithRetry:
                 )
 
         assert success is False
+        assert error is not None
         assert "Network error" in error
         assert retry_count == 2
         assert file_path is None
+        assert info_dict is None
 
     def test_handles_unexpected_exception(self, tmp_path: Path) -> None:
         """Test handling of unexpected exceptions."""
@@ -154,7 +160,7 @@ class TestDownloadWithRetry:
             mock_instance.extract_info.side_effect = RuntimeError("Unexpected error")
             mock_ydl.return_value.__enter__.return_value = mock_instance
 
-            success, error, retry_count, file_path = _download_with_retry(
+            success, error, retry_count, file_path, info_dict = _download_with_retry(
                 "https://youtube.com/watch?v=test",
                 {"paths": {"home": str(tmp_path)}},
                 "Test Video",
@@ -163,9 +169,11 @@ class TestDownloadWithRetry:
             )
 
         assert success is False
+        assert error is not None
         assert "Unexpected error" in error
         assert retry_count == 0
         assert file_path is None
+        assert info_dict is None
 
 
 class TestDownloadAudio:
@@ -175,12 +183,14 @@ class TestDownloadAudio:
         """Test successful audio download."""
         test_file = tmp_path / "test.m4a"
         test_file.touch()
+        info_dict = {"title": "Test Video", "chapters": []}
 
         with (
             patch("downloader._download_with_retry") as mock_retry,
             patch("downloader.process_thumbnail") as mock_thumb,
+            patch("downloader.process_chapters") as mock_chapters,
         ):
-            mock_retry.return_value = (True, None, 0, test_file)
+            mock_retry.return_value = (True, None, 0, test_file, info_dict)
 
             result = download_audio(
                 "test_video_id",
@@ -197,11 +207,12 @@ class TestDownloadAudio:
         assert result.error is None
         assert result.file_path == test_file
         mock_thumb.assert_called_once_with("test_video_id", test_file)
+        mock_chapters.assert_called_once_with(info_dict, test_file)
 
     def test_failed_download(self, tmp_path: Path) -> None:
         """Test failed audio download."""
         with patch("downloader._download_with_retry") as mock_retry:
-            mock_retry.return_value = (False, "Download failed", 2, None)
+            mock_retry.return_value = (False, "Download failed", 2, None, None)
 
             result = download_audio(
                 "test_video_id",
@@ -226,12 +237,12 @@ class TestDownloadAudio:
             ),
             patch("downloader._download_with_retry") as mock_retry,
             patch("downloader.process_thumbnail"),
+            patch("downloader.process_chapters"),
         ):
-            mock_retry.return_value = (True, None, 0, None)
+            mock_retry.return_value = (True, None, 0, None, None)
 
             download_audio("test_id", tmp_path)
 
-            # Check that the function was called (we can't easily verify params)
             mock_retry.assert_called_once()
 
 
