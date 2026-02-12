@@ -198,6 +198,9 @@ def download_audio(
         "outtmpl": "%(title)s - %(channel)s.%(ext)s",
         "quiet": True,
         "no_warnings": True,
+        "postprocessors": [
+            {"key": "FFmpegMetadata"},  # Embeds title, artist, date, etc.
+        ],
     }
 
     success, error, retry_count, file_path, info_dict = _download_with_retry(
