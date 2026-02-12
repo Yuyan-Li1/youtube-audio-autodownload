@@ -169,6 +169,9 @@ def embed_chapters_m4a(audio_path: Path, chapters: list[Chapter]) -> bool:
         output_path = audio_path.with_suffix(".tmp.m4a")
 
         try:
+            # Note: We don't use -map_metadata here to preserve original metadata
+            # (title, artist, cover art) from input 0. Only chapters are taken from
+            # the metadata file (input 1) via -map_chapters.
             result = subprocess.run(
                 [
                     "ffmpeg",
@@ -176,8 +179,6 @@ def embed_chapters_m4a(audio_path: Path, chapters: list[Chapter]) -> bool:
                     str(audio_path),
                     "-i",
                     str(metadata_path),
-                    "-map_metadata",
-                    "1",
                     "-map_chapters",
                     "1",
                     "-codec",
