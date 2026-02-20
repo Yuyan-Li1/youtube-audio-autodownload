@@ -201,6 +201,9 @@ class TestRun:
             audio_extensions=frozenset({".m4a"}),
             log_level="INFO",
             log_file=None,
+            sponsorblock_enabled=False,
+            sponsorblock_categories=(),
+            sponsorblock_action="remove",
             dry_run=True,
         )
         (tmp_path / "downloads").mkdir()
@@ -228,6 +231,9 @@ class TestRun:
             audio_extensions=frozenset({".m4a"}),
             log_level="INFO",
             log_file=None,
+            sponsorblock_enabled=False,
+            sponsorblock_categories=(),
+            sponsorblock_action="remove",
             dry_run=True,
         )
         (tmp_path / "downloads").mkdir()
@@ -262,6 +268,9 @@ class TestRun:
             audio_extensions=frozenset({".m4a"}),
             log_level="INFO",
             log_file=None,
+            sponsorblock_enabled=False,
+            sponsorblock_categories=(),
+            sponsorblock_action="remove",
             dry_run=True,
         )
         (tmp_path / "downloads").mkdir()
@@ -305,6 +314,9 @@ class TestRun:
             audio_extensions=frozenset({".m4a"}),
             log_level="INFO",
             log_file=None,
+            sponsorblock_enabled=False,
+            sponsorblock_categories=(),
+            sponsorblock_action="remove",
             dry_run=True,
         )
         (tmp_path / "downloads").mkdir()
@@ -363,6 +375,9 @@ class TestMain:
             audio_extensions=frozenset({".m4a"}),
             log_level="INFO",
             log_file=None,
+            sponsorblock_enabled=False,
+            sponsorblock_categories=(),
+            sponsorblock_action="remove",
             dry_run=True,
         )
 
@@ -390,6 +405,9 @@ class TestMain:
             audio_extensions=frozenset({".m4a"}),
             log_level="INFO",
             log_file=None,
+            sponsorblock_enabled=False,
+            sponsorblock_categories=(),
+            sponsorblock_action="remove",
             dry_run=True,
         )
 
@@ -420,6 +438,9 @@ class TestMain:
             audio_extensions=frozenset({".m4a"}),
             log_level="INFO",
             log_file=None,
+            sponsorblock_enabled=False,
+            sponsorblock_categories=(),
+            sponsorblock_action="remove",
             dry_run=True,
         )
         (tmp_path / "downloads").mkdir()
@@ -452,6 +473,9 @@ class TestMain:
             audio_extensions=frozenset({".m4a"}),
             log_level="INFO",
             log_file=None,
+            sponsorblock_enabled=False,
+            sponsorblock_categories=(),
+            sponsorblock_action="remove",
             dry_run=True,
         )
         (tmp_path / "downloads").mkdir()

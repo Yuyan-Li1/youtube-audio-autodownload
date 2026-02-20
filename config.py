@@ -19,6 +19,24 @@ DEFAULT_LOOKBACK_DAYS = 7
 DEFAULT_HISTORY_MAX_AGE_DAYS = 90
 DEFAULT_AUDIO_EXTENSIONS = ".m4a,.mp3,.opus,.webm,.aac,.ogg,.wav,.flac"
 
+# SponsorBlock defaults
+VALID_SPONSORBLOCK_CATEGORIES = frozenset(
+    {
+        "sponsor",
+        "intro",
+        "outro",
+        "selfpromo",
+        "interaction",
+        "poi_highlight",
+        "filler",
+        "music_offtopic",
+        "preview",
+    }
+)
+DEFAULT_SPONSORBLOCK_CATEGORIES = "sponsor,intro,outro,selfpromo,interaction,poi_highlight"
+VALID_SPONSORBLOCK_ACTIONS = frozenset({"remove", "mark"})
+DEFAULT_SPONSORBLOCK_ACTION = "remove"
+
 
 class ConfigError(Exception):
     """Raised when configuration is invalid or missing."""
@@ -43,6 +61,9 @@ class Config:
     audio_extensions: frozenset[str]
     log_level: str
     log_file: Path | None
+    sponsorblock_enabled: bool
+    sponsorblock_categories: tuple[str, ...]
+    sponsorblock_action: str
     dry_run: bool = False  # If True, use mock data instead of calling YouTube API
 
 
@@ -180,6 +201,33 @@ def load_config(env_file: Path | None = None, dry_run: bool = False) -> Config:
         _validate_path_safety(log_file, "LOG_FILE")
         log_file.parent.mkdir(parents=True, exist_ok=True)
 
+    # Optional: SponsorBlock integration (default: disabled)
+    sponsorblock_enabled = os.getenv("SPONSORBLOCK_ENABLED", "false").lower() == "true"
+
+    sponsorblock_categories_str = os.getenv(
+        "SPONSORBLOCK_CATEGORIES", DEFAULT_SPONSORBLOCK_CATEGORIES
+    )
+    if sponsorblock_categories_str.strip().lower() == "all":
+        sponsorblock_categories = tuple(sorted(VALID_SPONSORBLOCK_CATEGORIES))
+    else:
+        sponsorblock_categories = tuple(
+            cat.strip().lower() for cat in sponsorblock_categories_str.split(",") if cat.strip()
+        )
+        invalid = set(sponsorblock_categories) - VALID_SPONSORBLOCK_CATEGORIES
+        if invalid:
+            raise ConfigError(
+                f"SPONSORBLOCK_CATEGORIES contains invalid categories: {sorted(invalid)}. "
+                f"Valid categories: {sorted(VALID_SPONSORBLOCK_CATEGORIES)}"
+            )
+
+    sponsorblock_action = (
+        os.getenv("SPONSORBLOCK_ACTION", DEFAULT_SPONSORBLOCK_ACTION).lower().strip()
+    )
+    if sponsorblock_action not in VALID_SPONSORBLOCK_ACTIONS:
+        raise ConfigError(
+            f"SPONSORBLOCK_ACTION must be one of {sorted(VALID_SPONSORBLOCK_ACTIONS)}, got: {sponsorblock_action}"
+        )
+
     return Config(
         api_key=api_key,
         channel_ids=tuple(channel_ids),
@@ -191,6 +239,9 @@ def load_config(env_file: Path | None = None, dry_run: bool = False) -> Config:
         audio_extensions=audio_extensions,
         log_level=log_level,
         log_file=log_file,
+        sponsorblock_enabled=sponsorblock_enabled,
+        sponsorblock_categories=sponsorblock_categories,
+        sponsorblock_action=sponsorblock_action,
         dry_run=dry_run,
     )
 

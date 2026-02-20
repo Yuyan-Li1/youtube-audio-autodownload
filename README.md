@@ -11,6 +11,7 @@ Automatically download audio from YouTube videos and move them to your podcast a
 - **Configurable lookback**: Checks last N days for new videos (default: 7)
 - **Smart filtering**: Automatically skips YouTube Shorts and live streams
 - **Proper logging**: File-based logging for cron job debugging
+- **SponsorBlock integration**: Optionally remove or mark sponsored segments, intros, outros, and more
 - **API quota efficient**: Uses optimized API calls to minimize quota usage
 
 ## Installation
@@ -116,6 +117,9 @@ All configuration is done via environment variables. Create a `.env` file (copy 
 | `LOOKBACK_DAYS` | No | `7` | How many days back to check for new videos |
 | `LOG_LEVEL` | No | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `LOG_FILE` | No | - | File to write logs to |
+| `SPONSORBLOCK_ENABLED` | No | `false` | Enable SponsorBlock segment removal/marking |
+| `SPONSORBLOCK_CATEGORIES` | No | `sponsor,intro,...` | Comma-separated categories (or `all`) |
+| `SPONSORBLOCK_ACTION` | No | `remove` | `remove` (cut segments) or `mark` (chapter markers) |
 
 ### Example for Castro (macOS)
 
@@ -155,6 +159,27 @@ The download history ensures:
 If you want to include completed stream VODs, you can modify the detection logic in `youtube_api.py`.
 
 **API Quota Impact**: The filtering feature uses the efficient `videos.list` API call (1 quota unit per 50 videos), keeping the total quota usage very low (~3 units per channel).
+
+### SponsorBlock
+
+When enabled (`SPONSORBLOCK_ENABLED=true`), the downloader uses yt-dlp's built-in SponsorBlock integration to automatically handle sponsored segments and other non-content sections in videos.
+
+**Actions:**
+- `remove` (default): Cuts sponsored segments out of the audio file entirely
+- `mark`: Adds chapter markers around sponsored segments without removing them
+
+**Categories** (default: `sponsor,intro,outro,selfpromo,interaction,poi_highlight`):
+- `sponsor` - Paid promotions and sponsorship segments
+- `intro` - Intermission/intro animations
+- `outro` - End credits/outros
+- `selfpromo` - Unpaid self-promotion (merch, Patreon, etc.)
+- `interaction` - Subscribe reminders, like/comment prompts
+- `poi_highlight` - Highlight/key moment
+- `filler` - Tangential filler content
+- `music_offtopic` - Non-music section in music videos
+- `preview` - Preview/recap of other content
+
+Use `SPONSORBLOCK_CATEGORIES=all` to process all categories. SponsorBlock data is crowdsourced, so not all videos will have segments marked.
 
 ## Files
 

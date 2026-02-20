@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from config import (
+    VALID_SPONSORBLOCK_CATEGORIES,
     Config,
     ConfigError,
     _get_api_key,
@@ -298,8 +299,94 @@ class TestConfig:
             audio_extensions=frozenset({".m4a"}),
             log_level="INFO",
             log_file=None,
+            sponsorblock_enabled=False,
+            sponsorblock_categories=(),
+            sponsorblock_action="remove",
             dry_run=False,
         )
 
         with pytest.raises(AttributeError):
             config.api_key = "new_key"  # type: ignore
+
+
+class TestSponsorBlockConfig:
+    """Tests for SponsorBlock configuration."""
+
+    def _load_with_env(self, tmp_path: Path, env_overrides: dict | None = None) -> Config:
+        """Helper to load config with patched env and mocks."""
+        target_dir = tmp_path / "target"
+        target_dir.mkdir(exist_ok=True)
+
+        env = {"TARGET_DIRECTORY": str(target_dir)}
+        if env_overrides:
+            env.update(env_overrides)
+
+        with (
+            patch.dict(os.environ, env),
+            patch("config._get_api_key", return_value="test_key"),
+            patch("config._load_channel_ids", return_value=["UCchannel1"]),
+        ):
+            return load_config()
+
+    def test_disabled_by_default(self, tmp_path: Path) -> None:
+        """Test that SponsorBlock is disabled by default."""
+        config = self._load_with_env(tmp_path)
+        assert config.sponsorblock_enabled is False
+
+    def test_enabled_with_defaults(self, tmp_path: Path) -> None:
+        """Test enabling SponsorBlock with default categories and action."""
+        config = self._load_with_env(tmp_path, {"SPONSORBLOCK_ENABLED": "true"})
+        assert config.sponsorblock_enabled is True
+        assert "sponsor" in config.sponsorblock_categories
+        assert "intro" in config.sponsorblock_categories
+        assert "outro" in config.sponsorblock_categories
+        assert config.sponsorblock_action == "remove"
+
+    def test_custom_categories(self, tmp_path: Path) -> None:
+        """Test custom SponsorBlock categories."""
+        config = self._load_with_env(
+            tmp_path,
+            {
+                "SPONSORBLOCK_ENABLED": "true",
+                "SPONSORBLOCK_CATEGORIES": "sponsor,outro",
+            },
+        )
+        assert config.sponsorblock_categories == ("sponsor", "outro")
+
+    def test_all_categories_keyword(self, tmp_path: Path) -> None:
+        """Test 'all' keyword expands to all valid categories."""
+        config = self._load_with_env(
+            tmp_path,
+            {
+                "SPONSORBLOCK_ENABLED": "true",
+                "SPONSORBLOCK_CATEGORIES": "all",
+            },
+        )
+        assert set(config.sponsorblock_categories) == VALID_SPONSORBLOCK_CATEGORIES
+
+    def test_mark_action(self, tmp_path: Path) -> None:
+        """Test setting action to 'mark'."""
+        config = self._load_with_env(
+            tmp_path,
+            {
+                "SPONSORBLOCK_ENABLED": "true",
+                "SPONSORBLOCK_ACTION": "mark",
+            },
+        )
+        assert config.sponsorblock_action == "mark"
+
+    def test_invalid_category_raises(self, tmp_path: Path) -> None:
+        """Test that invalid categories raise ConfigError."""
+        with pytest.raises(ConfigError, match="invalid categories"):
+            self._load_with_env(
+                tmp_path,
+                {"SPONSORBLOCK_CATEGORIES": "sponsor,bogus_category"},
+            )
+
+    def test_invalid_action_raises(self, tmp_path: Path) -> None:
+        """Test that invalid action raises ConfigError."""
+        with pytest.raises(ConfigError, match="SPONSORBLOCK_ACTION"):
+            self._load_with_env(
+                tmp_path,
+                {"SPONSORBLOCK_ACTION": "delete"},
+            )
