@@ -80,14 +80,13 @@ def pad_to_square(image_data: bytes) -> bytes:
         Padded image as JPEG bytes.
     """
     with Image.open(io.BytesIO(image_data)) as img:
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
+        rgb_img = img.convert("RGB") if img.mode in ("RGBA", "P") else img
 
-        width, height = img.size
+        width, height = rgb_img.size
 
         if width == height:
             output = io.BytesIO()
-            img.save(output, format="JPEG", quality=95)
+            rgb_img.save(output, format="JPEG", quality=95)
             return output.getvalue()
 
         size = max(width, height)
@@ -95,7 +94,7 @@ def pad_to_square(image_data: bytes) -> bytes:
 
         x_offset = (size - width) // 2
         y_offset = (size - height) // 2
-        square_img.paste(img, (x_offset, y_offset))
+        square_img.paste(rgb_img, (x_offset, y_offset))
 
         output = io.BytesIO()
         square_img.save(output, format="JPEG", quality=95)
