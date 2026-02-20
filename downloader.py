@@ -161,6 +161,36 @@ def _is_permanent_error(error_msg: str) -> bool:
     return any(indicator.lower() in error_msg.lower() for indicator in permanent_indicators)
 
 
+def _build_sponsorblock_postprocessors(
+    categories: tuple[str, ...],
+    action: str,
+) -> list[dict]:
+    """Build yt-dlp postprocessor config for SponsorBlock.
+
+    Args:
+        categories: SponsorBlock segment categories to process.
+        action: Either "remove" (cut segments) or "mark" (chapter markers only).
+
+    Returns:
+        List of postprocessor dicts for yt-dlp.
+    """
+    postprocessors: list[dict] = [
+        {
+            "key": "SponsorBlock",
+            "categories": list(categories),
+            "when": "after_filter",
+        },
+    ]
+    if action == "remove":
+        postprocessors.append(
+            {
+                "key": "ModifyChapters",
+                "remove_sponsor_segments": list(categories),
+            }
+        )
+    return postprocessors
+
+
 def download_audio(
     video_id: str,
     download_dir: Path,
@@ -168,6 +198,8 @@ def download_audio(
     channel_id: str = "",
     max_retries: int | None = None,
     initial_backoff: float | None = None,
+    sponsorblock_categories: tuple[str, ...] = (),
+    sponsorblock_action: str = "remove",
 ) -> DownloadResult:
     """Download audio from a YouTube video with retry logic.
 
@@ -200,6 +232,11 @@ def download_audio(
         "no_warnings": True,
     }
 
+    if sponsorblock_categories:
+        ydl_opts["postprocessors"] = _build_sponsorblock_postprocessors(
+            sponsorblock_categories, sponsorblock_action
+        )
+
     success, error, retry_count, file_path, info_dict = _download_with_retry(
         video_url, ydl_opts, title or video_id, max_retries, initial_backoff
     )
@@ -231,6 +268,8 @@ def download_videos(
     download_dir: Path,
     max_retries: int | None = None,
     initial_backoff: float | None = None,
+    sponsorblock_categories: tuple[str, ...] = (),
+    sponsorblock_action: str = "remove",
 ) -> BatchDownloadResult:
     """Download audio from multiple videos with retry logic.
 
@@ -259,6 +298,8 @@ def download_videos(
             channel_id=video["channel_id"],
             max_retries=max_retries,
             initial_backoff=initial_backoff,
+            sponsorblock_categories=sponsorblock_categories,
+            sponsorblock_action=sponsorblock_action,
         )
 
         if download_result.success:

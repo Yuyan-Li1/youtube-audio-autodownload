@@ -113,8 +113,22 @@ def run(config: Config) -> int:
 
     logger.info("Found %s new video(s) to download", len(new_videos))
 
+    if config.sponsorblock_enabled:
+        logger.info(
+            "SponsorBlock enabled: action=%s, categories=%s",
+            config.sponsorblock_action,
+            ",".join(config.sponsorblock_categories),
+        )
+
     # 6. Download each video
-    download_results = download_videos(new_videos, config.download_dir)
+    download_results = download_videos(
+        new_videos,
+        config.download_dir,
+        sponsorblock_categories=config.sponsorblock_categories
+        if config.sponsorblock_enabled
+        else (),
+        sponsorblock_action=config.sponsorblock_action,
+    )
 
     # 7. Update history with successful downloads
     history = update_history_with_results(history, download_results, new_videos)

@@ -10,6 +10,7 @@ import yt_dlp
 from downloader import (
     BatchDownloadResult,
     DownloadResult,
+    _build_sponsorblock_postprocessors,
     _download_with_retry,
     _is_permanent_error,
     download_audio,
@@ -328,3 +329,90 @@ class TestDownloadResult:
 
         assert result.error is None
         assert result.retry_count == 0
+
+
+class TestBuildSponsorblockPostprocessors:
+    """Tests for _build_sponsorblock_postprocessors function."""
+
+    def test_remove_action_produces_two_postprocessors(self) -> None:
+        """Test that remove action produces SponsorBlock + ModifyChapters PPs."""
+        pps = _build_sponsorblock_postprocessors(("sponsor", "intro"), "remove")
+        assert len(pps) == 2
+        assert pps[0]["key"] == "SponsorBlock"
+        assert pps[0]["categories"] == ["sponsor", "intro"]
+        assert pps[1]["key"] == "ModifyChapters"
+        assert pps[1]["remove_sponsor_segments"] == ["sponsor", "intro"]
+
+    def test_mark_action_produces_one_postprocessor(self) -> None:
+        """Test that mark action produces only SponsorBlock PP."""
+        pps = _build_sponsorblock_postprocessors(("sponsor",), "mark")
+        assert len(pps) == 1
+        assert pps[0]["key"] == "SponsorBlock"
+        assert pps[0]["categories"] == ["sponsor"]
+
+    def test_categories_passed_through(self) -> None:
+        """Test that all categories are passed through correctly."""
+        cats = ("sponsor", "outro", "selfpromo", "interaction")
+        pps = _build_sponsorblock_postprocessors(cats, "remove")
+        assert pps[0]["categories"] == list(cats)
+        assert pps[1]["remove_sponsor_segments"] == list(cats)
+
+
+class TestSponsorblockIntegration:
+    """Tests for SponsorBlock integration in download functions."""
+
+    def test_download_audio_adds_postprocessors(self, tmp_path: Path) -> None:
+        """Test that download_audio adds SponsorBlock postprocessors to ydl_opts."""
+        with (
+            patch("downloader._download_with_retry") as mock_retry,
+            patch("downloader.process_thumbnail"),
+            patch("downloader.process_chapters"),
+        ):
+            mock_retry.return_value = (True, None, 0, None, None)
+
+            download_audio(
+                "test_id",
+                tmp_path,
+                max_retries=0,
+                sponsorblock_categories=("sponsor",),
+                sponsorblock_action="remove",
+            )
+
+            call_args = mock_retry.call_args
+            ydl_opts = call_args[0][1]
+            assert "postprocessors" in ydl_opts
+            assert ydl_opts["postprocessors"][0]["key"] == "SponsorBlock"
+
+    def test_download_audio_no_postprocessors_when_empty(self, tmp_path: Path) -> None:
+        """Test that no postprocessors added when categories are empty."""
+        with (
+            patch("downloader._download_with_retry") as mock_retry,
+            patch("downloader.process_thumbnail"),
+            patch("downloader.process_chapters"),
+        ):
+            mock_retry.return_value = (True, None, 0, None, None)
+
+            download_audio("test_id", tmp_path, max_retries=0)
+
+            call_args = mock_retry.call_args
+            ydl_opts = call_args[0][1]
+            assert "postprocessors" not in ydl_opts
+
+    def test_download_videos_passes_sponsorblock_params(self, tmp_path: Path) -> None:
+        """Test that download_videos passes SponsorBlock params to download_audio."""
+        videos = [{"id": "vid1", "title": "Video 1", "channel_id": "UC1"}]
+
+        with patch("downloader.download_audio") as mock_download:
+            mock_download.return_value = DownloadResult("vid1", "Video 1", "UC1", True)
+
+            download_videos(
+                videos,
+                tmp_path,
+                sponsorblock_categories=("sponsor", "outro"),
+                sponsorblock_action="mark",
+            )
+
+            mock_download.assert_called_once()
+            call_kwargs = mock_download.call_args[1]
+            assert call_kwargs["sponsorblock_categories"] == ("sponsor", "outro")
+            assert call_kwargs["sponsorblock_action"] == "mark"
