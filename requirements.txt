@@ -26,5 +26,5 @@ six==1.17.0
 uritemplate==4.2.0
 urllib3==2.6.3
 websockets==16.0
-yt-dlp==2026.2.4
+yt-dlp==2026.2.21
 Pillow==12.1.1
