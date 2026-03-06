@@ -1,7 +1,7 @@
 brotli==1.2.0
 cachetools==7.0.1
 certifi==2026.1.4
-charset-normalizer==3.4.4
+charset-normalizer==3.4.5
 google-api-core==2.30.0
 google-api-python-client==2.190.0
 google-auth==2.48.0
