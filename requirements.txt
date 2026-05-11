@@ -24,7 +24,7 @@ requests==2.32.5
 rsa==4.9.1
 six==1.17.0
 uritemplate==4.2.0
-urllib3==2.6.3
+urllib3==2.7.0
 websockets==16.0
 yt-dlp==2026.2.4
 Pillow==12.1.1
