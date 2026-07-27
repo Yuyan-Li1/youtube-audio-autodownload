@@ -10,17 +10,24 @@ on:
 
 jobs:
   test:
-    name: Test & Lint
+    name: Test & Lint (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the minimum supported version (see pyproject.toml);
+        # 3.14 is what the downloader runs on in production.
+        python-version: ["3.12", "3.14"]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
 
       - name: Install dependencies
@@ -46,7 +53,8 @@ jobs:
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v4
-        if: always()
+        # One upload is enough; coverage does not differ between versions.
+        if: always() && matrix.python-version == '3.14'
         with:
           file: ./coverage.xml
           fail_ci_if_error: false
