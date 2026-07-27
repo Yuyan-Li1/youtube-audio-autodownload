@@ -195,6 +195,36 @@ class TestMoveAudioFiles:
 
         assert result.total == 0
 
+    def test_skipped_files_are_logged(self, tmp_path: Path, caplog) -> None:
+        """Test that files left behind are reported, not silently ignored."""
+        source_dir = tmp_path / "source"
+        target_dir = tmp_path / "target"
+        source_dir.mkdir()
+        target_dir.mkdir()
+
+        (source_dir / "video.mp4").write_text("video")
+        (source_dir / "audio.m4a").write_text("audio")
+
+        result = move_audio_files(source_dir, target_dir)
+
+        assert result.success_count == 1
+        assert "video.mp4" in caplog.text
+        assert "audio.m4a" not in caplog.text
+
+    def test_ds_store_is_not_reported_as_skipped(self, tmp_path: Path, caplog) -> None:
+        """Test that macOS metadata files do not trigger the skipped-file warning."""
+        source_dir = tmp_path / "source"
+        target_dir = tmp_path / "target"
+        source_dir.mkdir()
+        target_dir.mkdir()
+
+        (source_dir / ".DS_Store").write_text("metadata")
+
+        result = move_audio_files(source_dir, target_dir)
+
+        assert result.total == 0
+        assert "extension not in" not in caplog.text
+
 
 class TestEnsureDirectory:
     """Tests for ensure_directory function."""

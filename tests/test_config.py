@@ -326,7 +326,8 @@ class TestSponsorBlockConfig:
             patch("config._get_api_key", return_value="test_key"),
             patch("config._load_channel_ids", return_value=["UCchannel1"]),
         ):
-            return load_config()
+            # Point at a nonexistent .env so a real one in the project root cannot leak in.
+            return load_config(env_file=tmp_path / "absent.env")
 
     def test_disabled_by_default(self, tmp_path: Path) -> None:
         """Test that SponsorBlock is disabled by default."""

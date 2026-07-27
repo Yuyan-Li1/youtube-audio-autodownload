@@ -8,11 +8,13 @@ import pytest
 import yt_dlp
 
 from downloader import (
+    AUDIO_FORMAT_SELECTOR,
     BatchDownloadResult,
     DownloadResult,
     _build_sponsorblock_postprocessors,
     _download_with_retry,
     _is_permanent_error,
+    _resolve_output_path,
     download_audio,
     download_videos,
 )
@@ -62,6 +64,8 @@ class TestDownloadWithRetry:
 
     def test_success_on_first_attempt(self, tmp_path: Path) -> None:
         """Test successful download on first attempt."""
+        (tmp_path / "test.m4a").touch()
+
         with patch("yt_dlp.YoutubeDL") as mock_ydl:
             mock_instance = MagicMock()
             mock_instance.extract_info.return_value = {"title": "Test"}
@@ -83,6 +87,8 @@ class TestDownloadWithRetry:
 
     def test_retry_on_temporary_error(self, tmp_path: Path) -> None:
         """Test retry behavior on temporary errors."""
+        (tmp_path / "test.m4a").touch()
+
         with patch("yt_dlp.YoutubeDL") as mock_ydl:
             mock_instance = MagicMock()
             mock_instance.extract_info.side_effect = [
@@ -151,6 +157,46 @@ class TestDownloadWithRetry:
         assert error is not None
         assert "Network error" in error
         assert retry_count == 2
+        assert file_path is None
+        assert info_dict is None
+
+    def test_missing_output_file_is_a_failure(self, tmp_path: Path) -> None:
+        """Test that a download producing no file is reported as failed, not successful."""
+        with patch("yt_dlp.YoutubeDL") as mock_ydl:
+            mock_instance = MagicMock()
+            mock_instance.extract_info.return_value = {"title": "Test"}
+            mock_instance.prepare_filename.return_value = str(tmp_path / "never_written.m4a")
+            mock_ydl.return_value.__enter__.return_value = mock_instance
+
+            success, error, retry_count, file_path, info_dict = _download_with_retry(
+                "https://youtube.com/watch?v=test",
+                {"paths": {"home": str(tmp_path)}},
+                "Test Video",
+                max_retries=3,
+                initial_backoff=0.01,
+            )
+
+        assert success is False
+        assert error is not None
+        assert "no file" in error
+        assert file_path is None
+
+    def test_empty_info_is_a_failure(self, tmp_path: Path) -> None:
+        """Test that extract_info returning nothing is reported as failed."""
+        with patch("yt_dlp.YoutubeDL") as mock_ydl:
+            mock_instance = MagicMock()
+            mock_instance.extract_info.return_value = None
+            mock_ydl.return_value.__enter__.return_value = mock_instance
+
+            success, error, retry_count, file_path, info_dict = _download_with_retry(
+                "https://youtube.com/watch?v=test",
+                {"paths": {"home": str(tmp_path)}},
+                "Test Video",
+                max_retries=3,
+                initial_backoff=0.01,
+            )
+
+        assert success is False
         assert file_path is None
         assert info_dict is None
 
@@ -383,8 +429,8 @@ class TestSponsorblockIntegration:
             assert "postprocessors" in ydl_opts
             assert ydl_opts["postprocessors"][0]["key"] == "SponsorBlock"
 
-    def test_download_audio_no_postprocessors_when_empty(self, tmp_path: Path) -> None:
-        """Test that no postprocessors added when categories are empty."""
+    def test_download_audio_no_sponsorblock_postprocessors_when_empty(self, tmp_path: Path) -> None:
+        """Test that no SponsorBlock postprocessors are added when categories are empty."""
         with (
             patch("downloader._download_with_retry") as mock_retry,
             patch("downloader.process_thumbnail"),
@@ -396,7 +442,9 @@ class TestSponsorblockIntegration:
 
             call_args = mock_retry.call_args
             ydl_opts = call_args[0][1]
-            assert "postprocessors" not in ydl_opts
+            keys = [pp["key"] for pp in ydl_opts["postprocessors"]]
+            assert "SponsorBlock" not in keys
+            assert "ModifyChapters" not in keys
 
     def test_download_videos_passes_sponsorblock_params(self, tmp_path: Path) -> None:
         """Test that download_videos passes SponsorBlock params to download_audio."""
@@ -416,3 +464,144 @@ class TestSponsorblockIntegration:
             call_kwargs = mock_download.call_args[1]
             assert call_kwargs["sponsorblock_categories"] == ("sponsor", "outro")
             assert call_kwargs["sponsorblock_action"] == "mark"
+
+
+class TestAudioOnlyGuarantee:
+    """Tests that downloads always yield audio, never a video file."""
+
+    def test_format_selector_prefers_audio_only(self, tmp_path: Path) -> None:
+        """Test that the format selector tries audio-only formats before a combined one."""
+        with (
+            patch("downloader._download_with_retry") as mock_retry,
+            patch("downloader.process_thumbnail"),
+            patch("downloader.process_chapters"),
+        ):
+            mock_retry.return_value = (True, None, 0, None, None)
+
+            download_audio("test_id", tmp_path, max_retries=0)
+
+            ydl_opts = mock_retry.call_args[0][1]
+            assert ydl_opts["format"] == AUDIO_FORMAT_SELECTOR
+            assert ydl_opts["format"].startswith("bestaudio")
+
+    def test_extract_audio_postprocessor_always_added(self, tmp_path: Path) -> None:
+        """Test that audio extraction runs even without SponsorBlock enabled."""
+        with (
+            patch("downloader._download_with_retry") as mock_retry,
+            patch("downloader.process_thumbnail"),
+            patch("downloader.process_chapters"),
+        ):
+            mock_retry.return_value = (True, None, 0, None, None)
+
+            download_audio("test_id", tmp_path, max_retries=0)
+
+            ydl_opts = mock_retry.call_args[0][1]
+            assert ydl_opts["postprocessors"][-1]["key"] == "FFmpegExtractAudio"
+
+    def test_extract_audio_runs_after_sponsorblock(self, tmp_path: Path) -> None:
+        """Test that audio extraction is ordered after the SponsorBlock postprocessors."""
+        with (
+            patch("downloader._download_with_retry") as mock_retry,
+            patch("downloader.process_thumbnail"),
+            patch("downloader.process_chapters"),
+        ):
+            mock_retry.return_value = (True, None, 0, None, None)
+
+            download_audio(
+                "test_id",
+                tmp_path,
+                max_retries=0,
+                sponsorblock_categories=("sponsor",),
+                sponsorblock_action="remove",
+            )
+
+            keys = [pp["key"] for pp in mock_retry.call_args[0][1]["postprocessors"]]
+            assert keys == ["SponsorBlock", "ModifyChapters", "FFmpegExtractAudio"]
+
+    def test_video_fallback_logs_warning(self, tmp_path: Path, caplog) -> None:
+        """Test that falling back to a video format is surfaced as a warning."""
+        with (
+            patch("downloader._download_with_retry") as mock_retry,
+            patch("downloader.process_thumbnail"),
+            patch("downloader.process_chapters"),
+        ):
+            mock_retry.return_value = (
+                True,
+                None,
+                0,
+                None,
+                {"vcodec": "avc1.42001E", "format_id": "18"},
+            )
+
+            download_audio("test_id", tmp_path, title="Test Video", max_retries=0)
+
+            assert "No audio-only format was available" in caplog.text
+            assert "18" in caplog.text
+
+    @pytest.mark.parametrize("vcodec", ["none", None])
+    def test_audio_only_download_logs_no_warning(
+        self, tmp_path: Path, caplog, vcodec: str | None
+    ) -> None:
+        """Test that audio-only downloads do not warn, however vcodec is reported."""
+        with (
+            patch("downloader._download_with_retry") as mock_retry,
+            patch("downloader.process_thumbnail"),
+            patch("downloader.process_chapters"),
+        ):
+            mock_retry.return_value = (True, None, 0, None, {"vcodec": vcodec, "format_id": "140"})
+
+            download_audio("test_id", tmp_path, title="Test Video", max_retries=0)
+
+            assert "No audio-only format was available" not in caplog.text
+
+
+class TestResolveOutputPath:
+    """Tests for _resolve_output_path function."""
+
+    def test_prefers_postprocessed_filepath(self, tmp_path: Path) -> None:
+        """Test that the postprocessed path from yt-dlp wins over prepare_filename."""
+        final = tmp_path / "video.m4a"
+        final.touch()
+        ydl = MagicMock()
+        ydl.prepare_filename.return_value = str(tmp_path / "video.mp4")
+
+        info = {"requested_downloads": [{"filepath": str(final)}]}
+
+        assert _resolve_output_path(ydl, info) == final
+
+    def test_falls_back_to_prepare_filename(self, tmp_path: Path) -> None:
+        """Test that prepare_filename is used when no postprocessed path is recorded."""
+        expected = tmp_path / "video.m4a"
+        expected.touch()
+        ydl = MagicMock()
+        ydl.prepare_filename.return_value = str(expected)
+
+        assert _resolve_output_path(ydl, {}) == expected
+
+    def test_probes_extensions_when_path_missing(self, tmp_path: Path) -> None:
+        """Test that a changed extension is discovered by probing."""
+        actual = tmp_path / "video.opus"
+        actual.touch()
+        ydl = MagicMock()
+        ydl.prepare_filename.return_value = str(tmp_path / "video.webm")
+
+        assert _resolve_output_path(ydl, {}) == actual
+
+    def test_ignores_recorded_path_that_does_not_exist(self, tmp_path: Path) -> None:
+        """Test that a stale recorded path is skipped in favour of a file on disk."""
+        actual = tmp_path / "video.m4a"
+        actual.touch()
+        ydl = MagicMock()
+        ydl.prepare_filename.return_value = str(actual)
+
+        info = {"requested_downloads": [{"filepath": str(tmp_path / "gone.m4a")}]}
+
+        assert _resolve_output_path(ydl, info) == actual
+
+    def test_returns_original_path_when_nothing_found(self, tmp_path: Path) -> None:
+        """Test that the reported path is returned even when no file exists."""
+        missing = tmp_path / "video.mp4"
+        ydl = MagicMock()
+        ydl.prepare_filename.return_value = str(missing)
+
+        assert _resolve_output_path(ydl, {}) == missing
