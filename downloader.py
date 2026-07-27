@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 # YouTube URL prefix
 YOUTUBE_URL_PREFIX = "https://www.youtube.com/watch?v="
 
+# Prefer audio-only formats. The trailing "best" is a last-resort combined video stream,
+# used when YouTube withholds audio-only formats; FFmpegExtractAudio strips it back down
+# to audio so a fallback never leaves a video file behind.
+AUDIO_FORMAT_SELECTOR = "bestaudio[ext=m4a]/bestaudio/best"
+
+# Extensions to probe when postprocessing has changed the file extension.
+POSTPROCESSED_EXTENSIONS = (".m4a", ".mp3", ".opus", ".ogg", ".webm", ".aac", ".flac", ".wav")
+
 # Retry configuration defaults
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_INITIAL_BACKOFF = 2.0  # seconds
@@ -91,14 +99,7 @@ def _download_with_retry(
                 info = ydl.extract_info(video_url, download=True)
                 if info:
                     info_dict = dict(info)
-                    filename = ydl.prepare_filename(info)
-                    file_path = Path(filename)
-                    if not file_path.exists():
-                        for ext in [".m4a", ".mp3", ".opus", ".ogg", ".webm"]:
-                            candidate = file_path.with_suffix(ext)
-                            if candidate.exists():
-                                file_path = candidate
-                                break
+                    file_path = _resolve_output_path(ydl, info)
             return True, None, retry_count, file_path, info_dict
 
         except yt_dlp.utils.DownloadError as e:
@@ -137,6 +138,38 @@ def _download_with_retry(
             break
 
     return False, last_error, retry_count, None, None
+
+
+def _resolve_output_path(ydl: yt_dlp.YoutubeDL, info: dict) -> Path:
+    """Determine the final path of a downloaded file.
+
+    Postprocessing (audio extraction, SponsorBlock cuts) can change the extension after
+    the download, so the path yt-dlp reports for the raw download may not exist.
+
+    Args:
+        ydl: The YoutubeDL instance used for the download.
+        info: Info dictionary returned by extract_info.
+
+    Returns:
+        Path to the downloaded file. May not exist if the file cannot be located.
+    """
+    # yt-dlp records the post-processed path here; prefer it over prepare_filename(),
+    # which reports the extension of the raw download.
+    for download in info.get("requested_downloads") or ():
+        final_path = download.get("filepath")
+        if final_path and Path(final_path).exists():
+            return Path(final_path)
+
+    file_path = Path(ydl.prepare_filename(info))
+    if file_path.exists():
+        return file_path
+
+    for ext in POSTPROCESSED_EXTENSIONS:
+        candidate = file_path.with_suffix(ext)
+        if candidate.exists():
+            return candidate
+
+    return file_path
 
 
 def _is_permanent_error(error_msg: str) -> bool:
@@ -224,18 +257,25 @@ def download_audio(
     if initial_backoff is None:
         initial_backoff = float(os.getenv("DOWNLOAD_INITIAL_BACKOFF", str(DEFAULT_INITIAL_BACKOFF)))
 
+    postprocessors: list[dict] = []
+
+    if sponsorblock_categories:
+        postprocessors.extend(
+            _build_sponsorblock_postprocessors(sponsorblock_categories, sponsorblock_action)
+        )
+
+    # Runs last: keeps the audio stream as-is when the download is already audio-only, and
+    # discards the video stream when the format selector had to fall back to a combined one.
+    postprocessors.append({"key": "FFmpegExtractAudio", "preferredcodec": "best"})
+
     ydl_opts = {
         "paths": {"home": str(download_dir)},
-        "format": "m4a/bestaudio/best",
+        "format": AUDIO_FORMAT_SELECTOR,
         "outtmpl": "%(title)s - %(channel)s.%(ext)s",
         "quiet": True,
         "no_warnings": True,
+        "postprocessors": postprocessors,
     }
-
-    if sponsorblock_categories:
-        ydl_opts["postprocessors"] = _build_sponsorblock_postprocessors(
-            sponsorblock_categories, sponsorblock_action
-        )
 
     success, error, retry_count, file_path, info_dict = _download_with_retry(
         video_url, ydl_opts, title or video_id, max_retries, initial_backoff
@@ -246,6 +286,14 @@ def download_audio(
             logger.info("Downloaded: %s (after %s retries)", title or video_id, retry_count)
         else:
             logger.info("Downloaded: %s", title or video_id)
+
+        if info_dict and info_dict.get("vcodec", "none") != "none":
+            logger.warning(
+                "No audio-only format was available for %s; fell back to video format %s "
+                "and extracted the audio. Check that yt-dlp is up to date.",
+                title or video_id,
+                info_dict.get("format_id", "unknown"),
+            )
 
         if file_path and file_path.exists():
             process_thumbnail(video_id, file_path)
