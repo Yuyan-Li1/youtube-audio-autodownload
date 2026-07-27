@@ -64,6 +64,8 @@ class TestDownloadWithRetry:
 
     def test_success_on_first_attempt(self, tmp_path: Path) -> None:
         """Test successful download on first attempt."""
+        (tmp_path / "test.m4a").touch()
+
         with patch("yt_dlp.YoutubeDL") as mock_ydl:
             mock_instance = MagicMock()
             mock_instance.extract_info.return_value = {"title": "Test"}
@@ -85,6 +87,8 @@ class TestDownloadWithRetry:
 
     def test_retry_on_temporary_error(self, tmp_path: Path) -> None:
         """Test retry behavior on temporary errors."""
+        (tmp_path / "test.m4a").touch()
+
         with patch("yt_dlp.YoutubeDL") as mock_ydl:
             mock_instance = MagicMock()
             mock_instance.extract_info.side_effect = [
@@ -153,6 +157,46 @@ class TestDownloadWithRetry:
         assert error is not None
         assert "Network error" in error
         assert retry_count == 2
+        assert file_path is None
+        assert info_dict is None
+
+    def test_missing_output_file_is_a_failure(self, tmp_path: Path) -> None:
+        """Test that a download producing no file is reported as failed, not successful."""
+        with patch("yt_dlp.YoutubeDL") as mock_ydl:
+            mock_instance = MagicMock()
+            mock_instance.extract_info.return_value = {"title": "Test"}
+            mock_instance.prepare_filename.return_value = str(tmp_path / "never_written.m4a")
+            mock_ydl.return_value.__enter__.return_value = mock_instance
+
+            success, error, retry_count, file_path, info_dict = _download_with_retry(
+                "https://youtube.com/watch?v=test",
+                {"paths": {"home": str(tmp_path)}},
+                "Test Video",
+                max_retries=3,
+                initial_backoff=0.01,
+            )
+
+        assert success is False
+        assert error is not None
+        assert "no file" in error
+        assert file_path is None
+
+    def test_empty_info_is_a_failure(self, tmp_path: Path) -> None:
+        """Test that extract_info returning nothing is reported as failed."""
+        with patch("yt_dlp.YoutubeDL") as mock_ydl:
+            mock_instance = MagicMock()
+            mock_instance.extract_info.return_value = None
+            mock_ydl.return_value.__enter__.return_value = mock_instance
+
+            success, error, retry_count, file_path, info_dict = _download_with_retry(
+                "https://youtube.com/watch?v=test",
+                {"paths": {"home": str(tmp_path)}},
+                "Test Video",
+                max_retries=3,
+                initial_backoff=0.01,
+            )
+
+        assert success is False
         assert file_path is None
         assert info_dict is None
 
@@ -494,14 +538,17 @@ class TestAudioOnlyGuarantee:
             assert "No audio-only format was available" in caplog.text
             assert "18" in caplog.text
 
-    def test_audio_only_download_logs_no_warning(self, tmp_path: Path, caplog) -> None:
-        """Test that a normal audio-only download does not warn."""
+    @pytest.mark.parametrize("vcodec", ["none", None])
+    def test_audio_only_download_logs_no_warning(
+        self, tmp_path: Path, caplog, vcodec: str | None
+    ) -> None:
+        """Test that audio-only downloads do not warn, however vcodec is reported."""
         with (
             patch("downloader._download_with_retry") as mock_retry,
             patch("downloader.process_thumbnail"),
             patch("downloader.process_chapters"),
         ):
-            mock_retry.return_value = (True, None, 0, None, {"vcodec": "none", "format_id": "140"})
+            mock_retry.return_value = (True, None, 0, None, {"vcodec": vcodec, "format_id": "140"})
 
             download_audio("test_id", tmp_path, title="Test Video", max_retries=0)
 

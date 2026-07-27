@@ -100,6 +100,20 @@ def _download_with_retry(
                 if info:
                     info_dict = dict(info)
                     file_path = _resolve_output_path(ydl, info)
+
+            # yt-dlp did not raise, but nothing landed on disk. Reporting success here would
+            # record the video in history and it would never be retried, while move_audio_files
+            # has no file to warn about either.
+            if file_path is None or not file_path.exists():
+                logger.error("Download of %s reported success but produced no file", title)
+                return (
+                    False,
+                    "Download reported success but produced no file",
+                    retry_count,
+                    None,
+                    None,
+                )
+
             return True, None, retry_count, file_path, info_dict
 
         except yt_dlp.utils.DownloadError as e:
@@ -266,6 +280,10 @@ def download_audio(
 
     # Runs last: keeps the audio stream as-is when the download is already audio-only, and
     # discards the video stream when the format selector had to fall back to a combined one.
+    # Ordering relies on yt-dlp running postprocessors of the same stage in insertion order,
+    # so extraction happens after ModifyChapters has made its cuts. That is an implicit
+    # dependency on yt-dlp internals; test_extract_audio_runs_after_sponsorblock pins it so a
+    # future upgrade that changes the default stages fails in CI rather than in production.
     postprocessors.append({"key": "FFmpegExtractAudio", "preferredcodec": "best"})
 
     ydl_opts = {
@@ -287,7 +305,8 @@ def download_audio(
         else:
             logger.info("Downloaded: %s", title or video_id)
 
-        if info_dict and info_dict.get("vcodec", "none") != "none":
+        # Normalizes both a missing key and an explicit None, which some extractors return.
+        if info_dict and (info_dict.get("vcodec") or "none") != "none":
             logger.warning(
                 "No audio-only format was available for %s; fell back to video format %s "
                 "and extracted the audio. Check that yt-dlp is up to date.",

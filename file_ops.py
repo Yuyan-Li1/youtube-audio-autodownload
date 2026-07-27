@@ -117,7 +117,9 @@ def move_audio_files(
 
     # Anything left behind is a silent failure otherwise: the file stays in the download
     # directory forever while history already records the video as downloaded.
-    skipped = [f for f in files if f not in audio_files and f.name != ".DS_Store"]
+    skipped = [
+        f for f in files if f.suffix.lower() not in audio_extensions and f.name != ".DS_Store"
+    ]
     if skipped:
         logger.warning(
             "Leaving %s file(s) in %s: extension not in %s. Files: %s",
