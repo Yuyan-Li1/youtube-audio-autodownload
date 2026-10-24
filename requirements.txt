@@ -1,4 +1,4 @@
-brotli==1.2.0
+brotli==1.2.1
 certifi==2026.7.22
 cffi==2.1.0
 charset-normalizer==3.4.9
